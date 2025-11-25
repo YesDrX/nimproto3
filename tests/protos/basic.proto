@@ -1,0 +1,9 @@
+syntax = "proto3";
+package basic;
+
+message Person {
+  string name = 1;
+  int32 id = 2;
+  bool has_email = 3;
+  repeated string email = 4;
+}

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+service TestService {
+  rpc SimpleTest(TestRequest) returns (TestReply) {};
+  rpc StreamTest(stream TestRequest) returns (stream TestReply) {};
+}
+
+message TestRequest {
+  string message = 1;
+  int32 counter = 2;
+}
+
+message TestReply {
+  string response = 1;
+  bool received = 2;
+}

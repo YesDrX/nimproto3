@@ -1,0 +1,10 @@
+syntax = "proto3";
+package importer;
+
+import "imported.proto";
+import public "imported.proto";
+import weak "imported.proto";
+
+message User {
+  imported.Common common = 1;
+}

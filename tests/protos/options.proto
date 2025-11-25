@@ -1,0 +1,11 @@
+syntax = "proto3";
+package options;
+
+option java_package = "com.example.options";
+option java_outer_classname = "OptionsProto";
+
+message Foo {
+  option deprecated = true;
+  int32 val = 1 [deprecated = true];
+  string name = 2 [json_name = "foo_name", deprecated = false];
+}

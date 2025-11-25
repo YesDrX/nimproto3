@@ -1,0 +1,10 @@
+syntax = "proto3";
+package google_tests;
+
+import "google/protobuf/wrappers.proto";
+
+message WrappersMessage {
+  google.protobuf.StringValue name = 1;
+  google.protobuf.Int32Value age = 2;
+  google.protobuf.BoolValue active = 3;
+}

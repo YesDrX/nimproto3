@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+service UserService {
+  rpc GetUser(UserRequest) returns (User) {};
+  rpc ListUsers(stream UserRequest) returns (stream User) {};
+}
+
+message UserRequest { int32 id = 1; }
+
+message User {
+  string name = 1;
+  int32 id = 2;
+  repeated string emails = 3;
+  map<string, int32> scores = 4;
+}

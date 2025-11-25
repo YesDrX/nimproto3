@@ -1,0 +1,7 @@
+syntax = "proto3";
+package maps;
+
+message Dictionary {
+  map<string, string> pairs = 1;
+  map<int32, bool> flags = 2;
+}

@@ -1,0 +1,8 @@
+syntax = "proto3";
+package google_tests;
+
+import "google/protobuf/empty.proto";
+
+service Health {
+  rpc Check(google.protobuf.Empty) returns (google.protobuf.Empty);
+}

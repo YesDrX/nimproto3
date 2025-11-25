@@ -1,0 +1,34 @@
+syntax = "proto3";
+package canonical;
+
+import "imported.proto";
+
+option java_package = "com.example.canonical";
+
+message Comprehensive {
+  string name = 1;
+  int32 id = 2;
+  repeated string tags = 3;
+  
+  enum Status {
+    UNKNOWN = 0;
+    ACTIVE = 1;
+  }
+  Status status = 4;
+  
+  oneof choice {
+    string text = 5;
+    int32 number = 6;
+  }
+  
+  map<string, int32> scores = 7;
+  
+  message Nested {
+    string val = 1;
+  }
+  Nested nested = 8;
+}
+
+service TestService {
+  rpc Test(Comprehensive) returns (Comprehensive);
+}

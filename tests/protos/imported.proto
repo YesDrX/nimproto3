@@ -1,0 +1,6 @@
+syntax = "proto3";
+package imported;
+
+message Common {
+  string id = 1;
+}

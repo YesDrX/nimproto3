@@ -1,0 +1,12 @@
+syntax = "proto3";
+package services;
+
+message Request {}
+message Response {}
+
+service MyService {
+  rpc Unary(Request) returns (Response);
+  rpc ServerStreaming(Request) returns (stream Response);
+  rpc ClientStreaming(stream Request) returns (Response);
+  rpc BidiStreaming(stream Request) returns (stream Response);
+}

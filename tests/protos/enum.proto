@@ -1,0 +1,17 @@
+syntax = "proto3";
+package enums;
+
+enum Color {
+  RED = 0;
+  GREEN = 1;
+  BLUE = 2;
+}
+
+message Paint {
+  Color color = 1;
+  enum Finish {
+    MATTE = 0;
+    GLOSS = 1;
+  }
+  Finish finish = 2;
+}
