@@ -18,8 +18,9 @@ type
     attrs*: seq[ProtoNode] # For options, etc.
     parent*: ProtoNode
     reanamedTypeNamesInScope*: Table[string, string]
+    globalTypeMap*: Table[string, string]
 
-proc copyTable[K, V](input : Table[K, V]) : Table[K, V] =
+proc copyTable[K, V](input: Table[K, V]): Table[K, V] =
   for k, v in input.pairs:
     result[k] = v
 
@@ -37,20 +38,54 @@ proc getFullTypeName*(node: ProtoNode): string =
       result = parent.name & "_" & result
     parent = parent.parent
 
+proc getRoot*(node: ProtoNode): ProtoNode =
+  result = node
+  while result.parent != nil:
+    result = result.parent
+
 proc renameSubmessageTypeNames*(node: ProtoNode) =
   if node.parent != nil:
     node.reanamedTypeNamesInScope = node.parent.reanamedTypeNamesInScope.copyTable()
-  
+
+  # First, process imports to add imported types to scope
   for child in node.children:
     child.parent = node
+    if child.kind == nkImport:
+      # Process imported proto files
+      for importedChild in child.children:
+        if importedChild.kind == nkProto:
+          # Get the package name from the imported proto
+          var packagePrefix = ""
+          for importedNode in importedChild.children:
+            if importedNode.kind == nkPackage:
+              packagePrefix = importedNode.name.replace(".", "_")
+              break
+
+          # Add all types from the imported file to the current scope and global map
+          for importedNode in importedChild.children:
+            if importedNode.kind == nkMessage or importedNode.kind == nkEnum:
+              let qualifiedName = if packagePrefix.len > 0:
+                packagePrefix & "_" & importedNode.name
+              else:
+                importedNode.name
+              node.reanamedTypeNamesInScope[importedNode.name] = qualifiedName
+
+              # Add to global map on root
+              var root = getRoot(node)
+              root.globalTypeMap[importedNode.name] = qualifiedName
+
+  # Then process nested types
+  for child in node.children:
     if child.kind == nkMessage or child.kind == nkEnum:
       let fullName = getFullTypeName(child)
       if fullName != child.name:
         node.reanamedTypeNamesInScope[child.name] = fullName
+
+  # Recursively process children
   for child in node.children:
-    if child.kind == nkMessage or child.kind == nkImport:
+    if child.kind == nkMessage or child.kind == nkImport or child.kind == nkProto:
       renameSubmessageTypeNames(child)
-  
+
 proc add*(parent: ProtoNode, child: ProtoNode) =
   parent.children.add(child)
 

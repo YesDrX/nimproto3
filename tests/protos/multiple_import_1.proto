@@ -1,0 +1,13 @@
+syntax = "proto3";
+package multiple_import_1;
+
+import "multiple_import_common.proto";
+
+message TypeMultipleImport1 {
+  CommonType common = 1;
+  enum EnumMultipleImport1 {
+    VALUE_1 = 0;
+    VALUE_2 = 1;
+  }
+  EnumMultipleImport1 enumMultipleImport1 = 2;
+}

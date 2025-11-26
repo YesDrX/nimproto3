@@ -319,7 +319,8 @@ proc getProtocIncludePath(): string =
   return ""
 
 proc parseProto*(content: string, searchDirs: seq[string] = @[],
-    cache: ref Table[string, ProtoNode] = nil): ProtoNode =
+    cache: ref Table[string, ProtoNode] = nil, extraImportPackages: seq[
+        string] = @[]): ProtoNode =
   var s: ParserState
 
   # Initialize search dirs with env var

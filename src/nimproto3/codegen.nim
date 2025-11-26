@@ -136,18 +136,29 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
 
       let fieldName = child.name
       var fieldTypeName = child.value
+      var typeWasRenamed = false
 
       # Check if this is a reference to a nested type - qualify it
       for (origName, qualName) in nestedTypeMap:
         if fieldTypeName == origName:
           fieldTypeName = qualName
+          typeWasRenamed = true
           break
 
       if node.reanamedTypeNamesInScope.len > 0 and
           node.reanamedTypeNamesInScope.hasKey(fieldTypeName):
         fieldTypeName = node.reanamedTypeNamesInScope[fieldTypeName]
+        typeWasRenamed = true
 
-      let fieldType = protoTypeToNim(fieldTypeName, isRepeated, packagePrefix)
+      if not typeWasRenamed:
+        let root = getRoot(node)
+        if root.globalTypeMap.hasKey(fieldTypeName):
+          fieldTypeName = root.globalTypeMap[fieldTypeName]
+          typeWasRenamed = true
+
+      # Only pass packagePrefix if the type wasn't already qualified
+      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+      let fieldType = protoTypeToNim(fieldTypeName, isRepeated, pkgPrefix)
 
       result &= "  " & escapeNimKeyword(fieldName) & "*: " & fieldType & "\n"
 
@@ -263,17 +274,28 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         if attr.kind == nkOption and attr.name == "label" and attr.value == "repeated":
           isRepeated = true
 
+      var typeWasRenamed = false
       # Qualify nested types
       for (origName, qualName) in nestedTypeMap:
         if protoType == origName:
           protoType = qualName
+          typeWasRenamed = true
       if node.reanamedTypeNamesInScope.len > 0 and
           node.reanamedTypeNamesInScope.hasKey(protoType):
         protoType = node.reanamedTypeNamesInScope[protoType]
+        typeWasRenamed = true
+      else:
+        let root = getRoot(node)
+        if root.globalTypeMap.hasKey(protoType):
+          protoType = root.globalTypeMap[protoType]
+          typeWasRenamed = true
 
       let wireType = if enumNames.contains(
-          protoType): "wtVarint" else: getWireType(child.value)
-      let encodeProc = getEncodeProc(child.value)
+          protoType): "wtVarint" else: getWireType(protoType)
+      let encodeProc = getEncodeProc(protoType)
+
+      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+      let nimType = protoTypeToNim(protoType, false, pkgPrefix)
 
       if isRepeated:
         result &= indentStr & "  for item in self." & escapeNimKeyword(
@@ -361,16 +383,26 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       let fieldName = child.name
       let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
       var protoType = child.value
+      var typeWasRenamed = false
       # Check if this is a nested type reference
       for (origName, qualName) in nestedTypeMap:
         if protoType == origName:
           protoType = qualName
+          typeWasRenamed = true
           break
       if node.reanamedTypeNamesInScope.len > 0 and
           node.reanamedTypeNamesInScope.hasKey(protoType):
         protoType = node.reanamedTypeNamesInScope[protoType]
+        typeWasRenamed = true
+      else:
+        let root = getRoot(node)
+        if root.globalTypeMap.hasKey(protoType):
+          protoType = root.globalTypeMap[protoType]
+          typeWasRenamed = true
+
       let decodeProc = getDecodeProc(child.value)
-      let nimType = protoTypeToNim(protoType, false, packagePrefix)
+      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+      let nimType = protoTypeToNim(protoType, false, pkgPrefix)
       let isEnum = enumNames.contains(protoType)
       result &= indentStr & "    of " & $fieldNum & ":\n"
       if isRepeated:
@@ -468,14 +500,24 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       var protoType = child.value
       let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
 
+      var typeWasRenamed = false
       # Qualify nested types
       for (origName, qualName) in nestedTypeMap:
         if protoType == origName:
           protoType = qualName
+          typeWasRenamed = true
       # Apply renamed type names from scope
       if node.reanamedTypeNamesInScope.len > 0 and
           node.reanamedTypeNamesInScope.hasKey(protoType):
         protoType = node.reanamedTypeNamesInScope[protoType]
+        typeWasRenamed = true
+      else:
+        let root = getRoot(node)
+        if root.globalTypeMap.hasKey(protoType):
+          protoType = root.globalTypeMap[protoType]
+          typeWasRenamed = true
+
+      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
 
       result &= indentStr & "  if node.hasKey(\"" & fieldName & "\"):\n"
 
@@ -497,7 +539,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
               ".add(" & protoTypeToNim(child.value, false, packagePrefix) & "(item.getFloat()))\n"
         else:
           # Message type
-          let nimType = protoTypeToNim(protoType, false, packagePrefix)
+          let nimType = protoTypeToNim(protoType, false, pkgPrefix)
           result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
               ".add(fromJson(" & nimType & ", item))\n"
       else:
@@ -525,7 +567,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
               "\"].getFloat())\n"
         else:
           # Message type
-          let nimType = protoTypeToNim(protoType, false, packagePrefix)
+          let nimType = protoTypeToNim(protoType, false, pkgPrefix)
           result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
               " = fromJson(" & nimType & ", node[\"" & fieldName & "\"])\n"
 
@@ -601,6 +643,29 @@ proc collectEnums(node: ProtoNode, prefix: string = "", results: var HashSet[str
     else:
       discard
 
+proc generateEnumSerializationProcs*(enumName: string): string =
+  ## Generate serialization procs for an enum type
+  result = ""
+
+  # toBinary proc - encode enum as int32
+  result &= "proc toBinary*(self: " & enumName & "): seq[byte] =\n"
+  result &= "  result = encodeInt32(int32(self))\n\n"
+
+  # fromBinary proc - decode int32 to enum
+  result &= "proc fromBinary*(T: typedesc[" & enumName &
+      "], data: openArray[byte]): " & enumName & " =\n"
+  result &= "  var pos = 0\n"
+  result &= "  result = " & enumName & "(decodeInt32(data, pos))\n\n"
+
+  # toJson proc - convert enum to JSON number
+  result &= "proc toJson*(self: " & enumName & "): JsonNode =\n"
+  result &= "  result = %int(self)\n\n"
+
+  # fromJson proc - parse JSON number to enum
+  result &= "proc fromJson*(T: typedesc[" & enumName & "], node: JsonNode): " &
+      enumName & " =\n"
+  result &= "  result = " & enumName & "(node.getInt())\n\n"
+
 proc generateAllSerializationProcs(node: ProtoNode, prefix: string = "",
     enumNames: HashSet[string], packagePrefix: string = "",
         checkDefined: bool = false): string =
@@ -617,15 +682,22 @@ proc generateAllSerializationProcs(node: ProtoNode, prefix: string = "",
     if subchild.kind == nkMessage or subchild.kind == nkEnum:
       nestedTypeMap.add((subchild.name, typeName & "_" & subchild.name))
 
-  # Recursively generate for nested messages
+  # Recursively generate for nested messages and enums
   for child in node.children:
-    if child.kind == nkMessage:
+    case child.kind
+    of nkMessage:
       # Nested message name construction needs to match what generateMessage does
       let childPrefix = if prefix.len > 0: prefix & "_" &
           node.name else: node.name
       # Don't pass checkDefined to nested - they're always defined when parent is
       result &= generateAllSerializationProcs(child, childPrefix, enumNames,
           packagePrefix, false)
+    of nkEnum:
+      # Generate serialization for nested enum
+      let enumName = typeName & "_" & capitalizeTypeName(child.name)
+      result &= generateEnumSerializationProcs(enumName)
+    else:
+      discard
 
   # Generate for current message
   result &= generateSerializationProcs(node, typeName, nestedTypeMap, enumNames,
@@ -763,33 +835,41 @@ proc generateTypes*(ast: ProtoNode): string =
 
   var processedImports = initHashSet[string]()
 
-  # First, process imports to generate imported types
-  for child in ast.children:
-    if child.kind == nkImport:
-      let importFile = child.value
-      if processedImports.contains(importFile): continue
-      processedImports.incl(importFile)
+  # Helper proc to recursively process imports
+  proc processImports(node: ProtoNode, mainTypes: var seq[string],
+      nestedTypes: var seq[string]) =
+    for child in node.children:
+      if child.kind == nkImport:
+        let importFile = child.value
+        if processedImports.contains(importFile): continue
+        processedImports.incl(importFile)
 
-      # Process the imported AST
-      for importedChild in child.children:
-        if importedChild.kind == nkProto:
-          # Get the package name from the imported proto to use as prefix
-          var packagePrefix = ""
-          for importedNode in importedChild.children:
-            if importedNode.kind == nkPackage:
-              packagePrefix = importedNode.name.replace(".", "_")
-              break
+        # Process the imported AST
+        for importedChild in child.children:
+          if importedChild.kind == nkProto:
+            # First, recursively process imports of this imported file
+            processImports(importedChild, mainTypes, nestedTypes)
 
-          # Generate types from the imported proto with package prefix
-          for importedNode in importedChild.children:
-            case importedNode.kind
-            of nkMessage:
-              mainTypes.add(generateMessage(importedNode, packagePrefix,
-                  nestedTypes, packagePrefix))
-            of nkEnum:
-              mainTypes.add(generateEnum(importedNode, packagePrefix))
-            else:
-              discard
+            # Get the package name from the imported proto to use as prefix
+            var packagePrefix = ""
+            for importedNode in importedChild.children:
+              if importedNode.kind == nkPackage:
+                packagePrefix = importedNode.name.replace(".", "_")
+                break
+
+            # Generate types from the imported proto with package prefix
+            for importedNode in importedChild.children:
+              case importedNode.kind
+              of nkMessage:
+                mainTypes.add(generateMessage(importedNode, packagePrefix,
+                    nestedTypes, packagePrefix))
+              of nkEnum:
+                mainTypes.add(generateEnum(importedNode, packagePrefix))
+              else:
+                discard
+
+  # First, process all imports (including transitive imports)
+  processImports(ast, mainTypes, nestedTypes)
 
   # Then process the main file's types
   for child in ast.children:
@@ -818,57 +898,88 @@ proc generateTypes*(ast: ProtoNode): string =
 
   # Forward declarations for imported messages
   var processedImportsFwd = initHashSet[string]()
-  for child in ast.children:
-    if child.kind == nkImport:
-      let importFile = child.value
-      if processedImportsFwd.contains(importFile):
-        continue
-      processedImportsFwd.incl(importFile)
 
-      for importedChild in child.children:
-        if importedChild.kind == nkProto:
-          var packagePrefix = ""
-          for importedNode in importedChild.children:
-            if importedNode.kind == nkPackage:
-              packagePrefix = importedNode.name.replace(".", "_")
-              break
+  proc processImportsFwd(node: ProtoNode): string =
+    result = ""
+    for child in node.children:
+      if child.kind == nkImport:
+        let importFile = child.value
+        if processedImportsFwd.contains(importFile):
+          continue
+        processedImportsFwd.incl(importFile)
 
-          for importedNode in importedChild.children:
-            if importedNode.kind == nkMessage:
-              result &= generateForwardDeclarations(importedNode, packagePrefix,
-                  packagePrefix, false)
+        for importedChild in child.children:
+          if importedChild.kind == nkProto:
+            # Recursively process imports of this imported file
+            result &= processImportsFwd(importedChild)
+
+            var packagePrefix = ""
+            for importedNode in importedChild.children:
+              if importedNode.kind == nkPackage:
+                packagePrefix = importedNode.name.replace(".", "_")
+                break
+
+            for importedNode in importedChild.children:
+              if importedNode.kind == nkMessage:
+                result &= generateForwardDeclarations(importedNode,
+                    packagePrefix, packagePrefix, false)
+
+  result &= processImportsFwd(ast)
 
   # Forward declarations for main messages
   for child in ast.children:
     if child.kind == nkMessage:
       result &= generateForwardDeclarations(child, "", "", false)
 
-  # Implementations for imported messages
+  # Implementations for imported messages and enums
   var processedImportsImpl = initHashSet[string]()
+
+  proc processImportsImpl(node: ProtoNode): string =
+    result = ""
+    for child in node.children:
+      if child.kind == nkImport:
+        let importFile = child.value
+        if processedImportsImpl.contains(importFile):
+          continue
+        processedImportsImpl.incl(importFile)
+
+        for importedChild in child.children:
+          if importedChild.kind == nkProto:
+            # Recursively process imports of this imported file
+            result &= processImportsImpl(importedChild)
+
+            var packagePrefix = ""
+            for importedNode in importedChild.children:
+              if importedNode.kind == nkPackage:
+                packagePrefix = importedNode.name.replace(".", "_")
+                break
+
+            for importedNode in importedChild.children:
+              case importedNode.kind
+              of nkMessage:
+                result &= generateAllSerializationProcs(importedNode,
+                    packagePrefix, enumNames, packagePrefix, false)
+              of nkEnum:
+                let enumName = if packagePrefix.len > 0:
+                  capitalizeTypeName(packagePrefix & "_" & importedNode.name)
+                else:
+                  capitalizeTypeName(importedNode.name)
+                result &= generateEnumSerializationProcs(enumName)
+              else:
+                discard
+
+  result &= processImportsImpl(ast)
+
+  # Generate serialization procs for main messages and enums
   for child in ast.children:
-    if child.kind == nkImport:
-      let importFile = child.value
-      if processedImportsImpl.contains(importFile):
-        continue
-      processedImportsImpl.incl(importFile)
-
-      for importedChild in child.children:
-        if importedChild.kind == nkProto:
-          var packagePrefix = ""
-          for importedNode in importedChild.children:
-            if importedNode.kind == nkPackage:
-              packagePrefix = importedNode.name.replace(".", "_")
-              break
-
-          for importedNode in importedChild.children:
-            if importedNode.kind == nkMessage:
-              result &= generateAllSerializationProcs(importedNode,
-                  packagePrefix, enumNames, packagePrefix, false)
-
-  # Generate serialization procs for main messages
-  for child in ast.children:
-    if child.kind == nkMessage:
+    case child.kind
+    of nkMessage:
       result &= generateAllSerializationProcs(child, "", enumNames, "", false)
+    of nkEnum:
+      let enumName = capitalizeTypeName(child.name)
+      result &= generateEnumSerializationProcs(enumName)
+    else:
+      discard
 
   # Generate gRPC service stubs
   for child in ast.children:
