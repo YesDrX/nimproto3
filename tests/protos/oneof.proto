@@ -1,10 +1,33 @@
 syntax = "proto3";
 package oneofs;
 
-message Result {
-  oneof result {
-    string error = 1;
-    int32 value = 2;
-    bool success = 3;
+message SampleMessage {
+  // Fields outside the oneof block
+  string name = 4;
+  int32 status_code = 5;
+
+  // The oneof block
+  oneof value {
+    string text = 1;
+    int32 number = 2;
+    bool custom_message = 3;
   }
+
+  // Other fields can be defined after the oneof
+  bool is_valid = 6;
+  repeated string tags = 7;
+  
+  oneof result {
+    string msg = 8;
+    int32 id = 9;
+  }
+
+  message SubMessage {
+    string detail = 10;
+    oneof error_type {
+      string error_text = 11;
+      int32 error_code = 12;
+    }
+  }
+  SubMessage sub = 13;
 }
