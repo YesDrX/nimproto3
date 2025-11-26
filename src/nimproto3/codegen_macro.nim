@@ -3,14 +3,15 @@ import ./[wire_format]
 
 export wire_format, json, tables, strutils
 
-proc importProtoImpl(file: string, searchDirs: seq[string]): NimNode =
+proc importProtoImpl(file: string, searchDirs: seq[string],
+        extraImportPackages: seq[string]): NimNode =
     # var cmdPath = staticExec("which protonim")
     # if cmdPath.len == 0:
     when defined(windows):
         const protonimPath = currentSourcePath().parentDir() / "\\..\\tools\\protonim.nim"
     else:
         const protonimPath = currentSourcePath().parentDir() & "/../tools/protonim.nim"
-    
+
     var cmdPath = "nim r " & protonimPath
     var cmd = cmdPath & " -i " & file
     if searchDirs.len > 0:
@@ -29,13 +30,18 @@ proc importProtoImpl(file: string, searchDirs: seq[string]): NimNode =
     result = generatedCode.parseStmt
 
 macro importProto3*(file: static[string]): untyped =
-    result = importProtoImpl(file, @[])
+    result = importProtoImpl(file, @[], @[])
 
 macro importProto3*(file: static[string], searchDirs: static[seq[
         string]]): untyped =
-    result = importProtoImpl(file, searchDirs)
+    result = importProtoImpl(file, searchDirs, @[])
 
-proc proto3Impl(proto_code: NimNode, searchDirs: seq[string]): NimNode {.compileTime.} =
+macro importProto3*(file: static[string], searchDirs: static[seq[
+        string]], extraImportPackages: static[seq[string]]): untyped =
+    result = importProtoImpl(file, searchDirs, extraImportPackages)
+
+proc proto3Impl(proto_code: NimNode, searchDirs: seq[
+        string], extraImportPackages: seq[string]): NimNode {.compileTime.} =
     var success = false
     when defined(windows):
         let filename = currentSourcePath().parentDir() & "\\tmp.proto"
@@ -44,27 +50,34 @@ proc proto3Impl(proto_code: NimNode, searchDirs: seq[string]): NimNode {.compile
     writeFile(filename, proto_code.strVal)
 
     try:
-        result = importProtoImpl(filename, searchDirs)
+        result = importProtoImpl(filename, searchDirs, extraImportPackages)
         success = true
     except Exception as e:
-        echo "Failed to generate code from proto code: \n" & proto_code.strVal & "\n" & e.msg
+        echo "Failed to generate code from proto code: \n" & proto_code.strVal &
+                "\n" & e.msg
     finally:
         when defined(windows):
-            let cmd = "powershell.exe -NoProfile -Command Remove-Item -Force \"" & filename & "\""
+            let cmd = "powershell.exe -NoProfile -Command Remove-Item -Force \"" &
+                    filename & "\""
         else:
             let cmd = "rm \"" & filename & "\""
         echo "[nimproto3] Running command: " & cmd
         echo staticExec(cmd)
 
     if not success:
-        raise newException(ValueError, "Failed to generate code from proto code: \n" & proto_code.strVal)
+        raise newException(ValueError, "Failed to generate code from proto code: \n" &
+                proto_code.strVal)
 
 macro proto3*(proto_code: untyped): untyped =
-    result = proto3Impl(proto_code, @[])
+    result = proto3Impl(proto_code, @[], @[])
 
 macro proto3*(proto_code: untyped, searchDirs: static[seq[
         string]]): untyped =
-    result = proto3Impl(proto_code, searchDirs)
+    result = proto3Impl(proto_code, searchDirs, @[])
+
+macro proto3*(proto_code: untyped, searchDirs: static[seq[
+        string]], extraImportPackages: static[seq[string]]): untyped =
+    result = proto3Impl(proto_code, searchDirs, extraImportPackages)
 
 # importProto3 "../../tests/protos/maps.proto", @["../../tests/protos"]
 

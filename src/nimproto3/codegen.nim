@@ -110,8 +110,6 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
   else:
     capitalizeTypeName(node.name)
 
-  result = typeName & "* = object\n"
-
   # First pass: collect nested type names for reference qualification
   var nestedTypeMap: seq[(string, string)] = @[] # (original name, qualified name)
   for child in node.children:
@@ -123,64 +121,220 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
         node.name & "_" & child.name
       nestedTypeMap.add((originalName, qualifiedName))
 
-  # Second pass: generate fields with qualified type names
+  # Collect oneof fields to process them separately
+  var oneofFields: seq[ProtoNode] = @[]
+  for child in node.children:
+    if child.kind == nkOneof:
+      oneofFields.add(child)
+
+  # If we have oneof fields, we need to generate a variant object
+  if oneofFields.len > 0:
+    # Generate oneof kind enums first - but put them directly in the result, not nestedTypes
+    var enumDefs = ""
+    for oneofNode in oneofFields:
+      # Use simpler naming: TypeName + "Kind" instead of TypeName + OneofName + "Kind"
+      let oneofKindName = typeName & "Kind"
+      enumDefs &= oneofKindName & "* = enum\n"
+      enumDefs &= "  rkNone  # nothing set\n"
+      
+      for field in oneofNode.children:
+        if field.kind == nkField:
+          let fieldName = field.name
+          enumDefs &= "  rk" & capitalizeTypeName(fieldName) & "\n"
+
+    # Generate the enum definition before the object definition
+    result = enumDefs & "\n"
+    
+    # Now generate the main object with oneof variant fields
+    result &= typeName & "* = object\n"
+    
+    # First, generate regular fields (non-oneof)
+    for child in node.children:
+      case child.kind
+      of nkField:
+        # Check if field is repeated
+        var isRepeated = false
+        for attr in child.attrs:
+          if attr.kind == nkOption and attr.name == "label" and attr.value == "repeated":
+            isRepeated = true
+            break
+
+        let fieldName = child.name
+        var fieldTypeName = child.value
+        var typeWasRenamed = false
+
+        # Check if this is a reference to a nested type - qualify it
+        for (origName, qualName) in nestedTypeMap:
+          if fieldTypeName == origName:
+            fieldTypeName = qualName
+            typeWasRenamed = true
+            break
+
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(fieldTypeName):
+          fieldTypeName = node.reanamedTypeNamesInScope[fieldTypeName]
+          typeWasRenamed = true
+
+        if not typeWasRenamed:
+          let root = getRoot(node)
+          if root.globalTypeMap.hasKey(fieldTypeName):
+            fieldTypeName = root.globalTypeMap[fieldTypeName]
+            typeWasRenamed = true
+
+        # Only pass packagePrefix if the type wasn't already qualified
+        let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+        let fieldType = protoTypeToNim(fieldTypeName, isRepeated, pkgPrefix)
+
+        result &= "  " & escapeNimKeyword(fieldName) & "*: " & fieldType & "\n"
+
+      of nkMapField:
+        # map<K,V> -> Table[K, V]
+        let parts = child.value.split(",")
+        if parts.len == 2:
+          var keyBase = parts[0].strip()
+          var valBase = parts[1].strip()
+          if node.reanamedTypeNamesInScope.len > 0 and
+              node.reanamedTypeNamesInScope.hasKey(valBase):
+            valBase = node.reanamedTypeNamesInScope[valBase]
+          let keyType = protoTypeToNim(keyBase, false, packagePrefix)
+          let valType = protoTypeToNim(valBase, false, packagePrefix)
+          result &= "  " & escapeNimKeyword(child.name) & "*: Table[" & keyType &
+              ", " & valType & "]\n"
+
+      of nkOneof, nkMessage, nkEnum:
+        # Skip these for now - handled separately
+        discard
+
+      else:
+        discard
+
+    # Add the kind field for the first oneof (we only support one oneof per message for now)
+    if oneofFields.len > 0:
+      let firstOneof = oneofFields[0]
+      let oneofName = firstOneof.name
+      let oneofKindName = typeName & "Kind"
+      
+      # Generate the case statement for the variant - no separate kind field needed
+      result &= "  case " & escapeNimKeyword(oneofName & "Kind") & "*: " & oneofKindName & "\n"
+      
+      # Add the none case
+      result &= "  of rkNone: discard\n"
+      
+      # Add each field in the oneof
+      for field in firstOneof.children:
+        if field.kind == nkField:
+          let fieldName = field.name
+          var fieldTypeName = field.value
+          var typeWasRenamed = false
+
+          # Check if this is a reference to a nested type - qualify it
+          for (origName, qualName) in nestedTypeMap:
+            if fieldTypeName == origName:
+              fieldTypeName = qualName
+              typeWasRenamed = true
+              break
+
+          if node.reanamedTypeNamesInScope.len > 0 and
+              node.reanamedTypeNamesInScope.hasKey(fieldTypeName):
+            fieldTypeName = node.reanamedTypeNamesInScope[fieldTypeName]
+            typeWasRenamed = true
+
+          if not typeWasRenamed:
+            let root = getRoot(node)
+            if root.globalTypeMap.hasKey(fieldTypeName):
+              fieldTypeName = root.globalTypeMap[fieldTypeName]
+              typeWasRenamed = true
+
+          # Only pass packagePrefix if the type wasn't already qualified
+          let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+          let fieldType = protoTypeToNim(fieldTypeName, false, pkgPrefix)
+          
+          result &= "  of rk" & capitalizeTypeName(fieldName) & ":\n"
+          result &= "    " & escapeNimKeyword(fieldName) & "*: " & fieldType & "\n"
+      
+  else:
+    # No oneof fields, generate normally
+    result = typeName & "* = object\n"
+    
+    for child in node.children:
+      case child.kind
+      of nkField:
+        # Check if field is repeated
+        var isRepeated = false
+        for attr in child.attrs:
+          if attr.kind == nkOption and attr.name == "label" and attr.value == "repeated":
+            isRepeated = true
+            break
+
+        let fieldName = child.name
+        var fieldTypeName = child.value
+        var typeWasRenamed = false
+
+        # Check if this is a reference to a nested type - qualify it
+        for (origName, qualName) in nestedTypeMap:
+          if fieldTypeName == origName:
+            fieldTypeName = qualName
+            typeWasRenamed = true
+            break
+
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(fieldTypeName):
+          fieldTypeName = node.reanamedTypeNamesInScope[fieldTypeName]
+          typeWasRenamed = true
+
+        if not typeWasRenamed:
+          let root = getRoot(node)
+          if root.globalTypeMap.hasKey(fieldTypeName):
+            fieldTypeName = root.globalTypeMap[fieldTypeName]
+            typeWasRenamed = true
+
+        # Only pass packagePrefix if the type wasn't already qualified
+        let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+        let fieldType = protoTypeToNim(fieldTypeName, isRepeated, pkgPrefix)
+
+        result &= "  " & escapeNimKeyword(fieldName) & "*: " & fieldType & "\n"
+
+      of nkMapField:
+        # map<K,V> -> Table[K, V]
+        let parts = child.value.split(",")
+        if parts.len == 2:
+          var keyBase = parts[0].strip()
+          var valBase = parts[1].strip()
+          if node.reanamedTypeNamesInScope.len > 0 and
+              node.reanamedTypeNamesInScope.hasKey(valBase):
+            valBase = node.reanamedTypeNamesInScope[valBase]
+          let keyType = protoTypeToNim(keyBase, false, packagePrefix)
+          let valType = protoTypeToNim(valBase, false, packagePrefix)
+          result &= "  " & escapeNimKeyword(child.name) & "*: Table[" & keyType &
+              ", " & valType & "]\n"
+
+      of nkOneof:
+        # Skip oneofs - handled above
+        discard
+
+      of nkMessage:
+        # Nested message - generate it separately with qualified name
+        let nestedName = if prefix.len > 0:
+          prefix & "_" & node.name
+        else:
+          node.name
+        nestedTypes.add(generateMessage(child, nestedName, nestedTypes,
+            packagePrefix))
+
+      of nkEnum:
+        # Nested enum - generate it separately with qualified name
+        let nestedName = if prefix.len > 0:
+          prefix & "_" & node.name
+        else:
+          node.name
+        nestedTypes.add(generateEnum(child, nestedName))
+
+      else:
+        discard
+
+  # Handle nested messages and enums (outside of oneof handling)
   for child in node.children:
     case child.kind
-    of nkField:
-      # Check if field is repeated
-      var isRepeated = false
-      for attr in child.attrs:
-        if attr.kind == nkOption and attr.name == "label" and attr.value == "repeated":
-          isRepeated = true
-          break
-
-      let fieldName = child.name
-      var fieldTypeName = child.value
-      var typeWasRenamed = false
-
-      # Check if this is a reference to a nested type - qualify it
-      for (origName, qualName) in nestedTypeMap:
-        if fieldTypeName == origName:
-          fieldTypeName = qualName
-          typeWasRenamed = true
-          break
-
-      if node.reanamedTypeNamesInScope.len > 0 and
-          node.reanamedTypeNamesInScope.hasKey(fieldTypeName):
-        fieldTypeName = node.reanamedTypeNamesInScope[fieldTypeName]
-        typeWasRenamed = true
-
-      if not typeWasRenamed:
-        let root = getRoot(node)
-        if root.globalTypeMap.hasKey(fieldTypeName):
-          fieldTypeName = root.globalTypeMap[fieldTypeName]
-          typeWasRenamed = true
-
-      # Only pass packagePrefix if the type wasn't already qualified
-      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
-      let fieldType = protoTypeToNim(fieldTypeName, isRepeated, pkgPrefix)
-
-      result &= "  " & escapeNimKeyword(fieldName) & "*: " & fieldType & "\n"
-
-    of nkMapField:
-      # map<K,V> -> Table[K, V]
-      let parts = child.value.split(",")
-      if parts.len == 2:
-        var keyBase = parts[0].strip()
-        var valBase = parts[1].strip()
-        if node.reanamedTypeNamesInScope.len > 0 and
-            node.reanamedTypeNamesInScope.hasKey(valBase):
-          valBase = node.reanamedTypeNamesInScope[valBase]
-        let keyType = protoTypeToNim(keyBase, false, packagePrefix)
-        let valType = protoTypeToNim(valBase, false, packagePrefix)
-        result &= "  " & escapeNimKeyword(child.name) & "*: Table[" & keyType &
-            ", " & valType & "]\n"
-
-    of nkOneof:
-      # For oneof, create variant object
-      # For now, skip oneofs
-      discard
-
     of nkMessage:
       # Nested message - generate it separately with qualified name
       let nestedName = if prefix.len > 0:
@@ -257,115 +411,192 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
 
   result &= indentStr & "# Serialization procs for " & typeName & "\n"
 
-  # toBinary proc
+  # Check if this message has oneof fields
+  var oneofFields: seq[ProtoNode] = @[]
+  for child in node.children:
+    if child.kind == nkOneof:
+      oneofFields.add(child)
+      
+  let hasOneof = oneofFields.len > 0
+  let oneofKindName = if hasOneof: typeName & "Kind" else: ""
+
   # toBinary proc
   result &= indentStr & "proc toBinary*(self: " & typeName & "): seq[byte] =\n"
   result &= indentStr & "  result = @[]\n"
 
-  for child in node.children:
-    if child.kind == nkField:
-      let fieldNum = child.number
-      let fieldName = child.name
-      var protoType = child.value
-      var isRepeated = false
+  if hasOneof:
+    # For oneof fields, we generate a case statement
+    result &= indentStr & "  case self." & escapeNimKeyword("resultKind") & "\n"
+    
+    # Handle the none case
+    result &= indentStr & "  of rkNone:\n"
+    result &= indentStr & "    discard\n"
+    
+    # Handle each oneof field
+    for oneofNode in oneofFields:
+      for oneofField in oneofNode.children:
+        if oneofField.kind == nkField:
+          let fieldNum = oneofField.number
+          let fieldName = oneofField.name
+          var protoType = oneofField.value
+          
+          var typeWasRenamed = false
+          # Qualify nested types
+          for (origName, qualName) in nestedTypeMap:
+            if protoType == origName:
+              protoType = qualName
+              typeWasRenamed = true
+          if node.reanamedTypeNamesInScope.len > 0 and
+              node.reanamedTypeNamesInScope.hasKey(protoType):
+            protoType = node.reanamedTypeNamesInScope[protoType]
+            typeWasRenamed = true
+          else:
+            let root = getRoot(node)
+            if root.globalTypeMap.hasKey(protoType):
+              protoType = root.globalTypeMap[protoType]
+              typeWasRenamed = true
 
-      # Check if repeated
-      for attr in child.attrs:
-        if attr.kind == nkOption and attr.name == "label" and attr.value == "repeated":
-          isRepeated = true
+          let encodeProc = getEncodeProc(protoType)
+          let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+          let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+          let isEnum = enumNames.contains(protoType)
+          let wireType = if isEnum: "wtVarint" else: getWireType(protoType)
+          
+          result &= indentStr & "  of rk" & capitalizeTypeName(fieldName) & ":\n"
+          
+          if wireType == "wtLengthDelimited":
+            # Length-delimited fields (strings, bytes, messages)
+            result &= indentStr & "    # field " & $fieldNum & ", wire=2 (length-delimited)\n"
+            result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtLengthDelimited))\n"
+            if encodeProc.len > 0:
+              result &= indentStr & "    let s = self." & escapeNimKeyword(fieldName) & "\n"
+              result &= indentStr & "    result.add(encodeString(s))\n"
+            else:
+              # Message type
+              result &= indentStr & "    let msgData = toBinary(self." & escapeNimKeyword(fieldName) & ")\n"
+              result &= indentStr & "    result.add(encodeVarint(uint64(msgData.len)))\n"
+              result &= indentStr & "    result.add(msgData)\n"
+          else:
+            # Varint fields (integers, booleans, enums)
+            result &= indentStr & "    # field " & $fieldNum & ", wire=0 (varint)\n"
+            result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtVarint))\n"
+            if encodeProc.len > 0:
+              result &= indentStr & "    result.add(" & encodeProc & "(self." & 
+                  escapeNimKeyword(fieldName) & "))\n"
+            elif isEnum:
+              result &= indentStr & "    result.add(encodeVarint(uint64(int(self." & 
+                  escapeNimKeyword(fieldName) & "))))\n"
+            else:
+              # Boolean
+              result &= indentStr & "    result.add(encodeVarint(uint64(self." & 
+                  escapeNimKeyword(fieldName) & ".int)))\n"
+  else:
+    # Handle regular fields (no oneof)
+    for child in node.children:
+      if child.kind == nkField:
+        let fieldNum = child.number
+        let fieldName = child.name
+        var protoType = child.value
+        var isRepeated = false
 
-      var typeWasRenamed = false
-      # Qualify nested types
-      for (origName, qualName) in nestedTypeMap:
-        if protoType == origName:
-          protoType = qualName
+        # Check if repeated
+        for attr in child.attrs:
+          if attr.kind == nkOption and attr.name == "label" and attr.value == "repeated":
+            isRepeated = true
+
+        var typeWasRenamed = false
+        # Qualify nested types
+        for (origName, qualName) in nestedTypeMap:
+          if protoType == origName:
+            protoType = qualName
+            typeWasRenamed = true
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(protoType):
+          protoType = node.reanamedTypeNamesInScope[protoType]
           typeWasRenamed = true
-      if node.reanamedTypeNamesInScope.len > 0 and
-          node.reanamedTypeNamesInScope.hasKey(protoType):
-        protoType = node.reanamedTypeNamesInScope[protoType]
-        typeWasRenamed = true
-      else:
-        let root = getRoot(node)
-        if root.globalTypeMap.hasKey(protoType):
-          protoType = root.globalTypeMap[protoType]
-          typeWasRenamed = true
+        else:
+          let root = getRoot(node)
+          if root.globalTypeMap.hasKey(protoType):
+            protoType = root.globalTypeMap[protoType]
+            typeWasRenamed = true
 
-      let wireType = if enumNames.contains(
-          protoType): "wtVarint" else: getWireType(protoType)
-      let encodeProc = getEncodeProc(protoType)
+        let wireType = if enumNames.contains(
+            protoType): "wtVarint" else: getWireType(protoType)
+        let encodeProc = getEncodeProc(protoType)
 
-      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
-      let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+        let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+        let nimType = protoTypeToNim(protoType, false, pkgPrefix)
 
-      if isRepeated:
-        result &= indentStr & "  for item in self." & escapeNimKeyword(
+        if isRepeated:
+          result &= indentStr & "  for item in self." & escapeNimKeyword(
+              fieldName) & ":\n"
+          result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum &
+              ", " & wireType & "))\n"
+          if encodeProc.len > 0:
+            result &= indentStr & "    result.add(" & encodeProc & "(item))\n"
+          else:
+            result &= indentStr & "    let itemData = toBinary(item)\n"
+            result &= indentStr & "    result.add(encodeLengthDelimited(itemData))\n"
+        else:
+          # Regular field
+          if encodeProc.len > 0:
+            result &= indentStr & "  result.add(encodeFieldKey(" & $fieldNum &
+                ", " & wireType & "))\n"
+            result &= indentStr & "  result.add(" & encodeProc & "(self." &
+                escapeNimKeyword(fieldName) & "))\n"
+          elif enumNames.contains(protoType):
+            result &= indentStr & "  result.add(encodeInt32(int32(self." &
+                escapeNimKeyword(fieldName) &
+                ")))\n"
+          else:
+            result &= indentStr & "  block:\n"
+            result &= indentStr & "    let fieldData = toBinary(self." &
+                escapeNimKeyword(fieldName) & ")\n"
+            result &= indentStr & "    if fieldData.len > 0:\n"
+            result &= indentStr & "      result.add(encodeFieldKey(" & $fieldNum &
+                ", " & wireType & "))\n"
+            result &= indentStr & "      result.add(encodeLengthDelimited(fieldData))\n"
+            
+      elif child.kind == nkMapField:
+        let fieldNum = child.number
+        let fieldName = child.name
+        let parts = child.value.split(",")
+        var keyType = parts[0].strip()
+        var valType = parts[1].strip()
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(valType):
+          valType = node.reanamedTypeNamesInScope[valType]
+
+        let keyWireType = getWireType(keyType)
+        let valWireType = getWireType(valType)
+
+        let keyEncode = getEncodeProc(keyType)
+        let valEncode = getEncodeProc(valType)
+
+        result &= indentStr & "  for key, val in self." & escapeNimKeyword(
             fieldName) & ":\n"
-        result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum &
-            ", " & wireType & "))\n"
-        if encodeProc.len > 0:
-          result &= indentStr & "    result.add(" & encodeProc & "(item))\n"
+        result &= indentStr & "    var entry = newSeq[byte]()\n"
+
+        # Encode Key (field 1)
+        result &= indentStr & "    entry.add(encodeFieldKey(1, " & keyWireType & "))\n"
+        if keyEncode.len > 0:
+          result &= indentStr & "    entry.add(" & keyEncode & "(key))\n"
         else:
-          result &= indentStr & "    let itemData = toBinary(item)\n"
-          result &= indentStr & "    result.add(encodeLengthDelimited(itemData))\n"
-      else:
-        if encodeProc.len > 0:
-          result &= indentStr & "  result.add(encodeFieldKey(" & $fieldNum &
-              ", " & wireType & "))\n"
-          result &= indentStr & "  result.add(" & encodeProc & "(self." &
-              escapeNimKeyword(fieldName) & "))\n"
-        elif enumNames.contains(protoType):
-          result &= indentStr & "  result.add(encodeInt32(int32(self." &
-              escapeNimKeyword(fieldName) &
-              ")))\n"
+          # Keys can only be scalar types, so this should be covered, but for safety:
+          result &= indentStr & "    entry.add(toBinary(key))\n"
+
+        # Encode Value (field 2)
+        result &= indentStr & "    entry.add(encodeFieldKey(2, " & valWireType & "))\n"
+        if valEncode.len > 0:
+          result &= indentStr & "    entry.add(" & valEncode & "(val))\n"
         else:
-          result &= indentStr & "  block:\n"
-          result &= indentStr & "    let fieldData = toBinary(self." &
-              escapeNimKeyword(fieldName) & ")\n"
-          result &= indentStr & "    if fieldData.len > 0:\n"
-          result &= indentStr & "      result.add(encodeFieldKey(" & $fieldNum &
-              ", " & wireType & "))\n"
-          result &= indentStr & "      result.add(encodeLengthDelimited(fieldData))\n"
+          # Value can be message
+          result &= indentStr & "    let valData = toBinary(val)\n"
+          result &= indentStr & "    entry.add(encodeLengthDelimited(valData))\n"
 
-    elif child.kind == nkMapField:
-      let fieldNum = child.number
-      let fieldName = child.name
-      let parts = child.value.split(",")
-      var keyType = parts[0].strip()
-      var valType = parts[1].strip()
-      if node.reanamedTypeNamesInScope.len > 0 and
-          node.reanamedTypeNamesInScope.hasKey(valType):
-        valType = node.reanamedTypeNamesInScope[valType]
-
-      let keyWireType = getWireType(keyType)
-      let valWireType = getWireType(valType)
-
-      let keyEncode = getEncodeProc(keyType)
-      let valEncode = getEncodeProc(valType)
-
-      result &= indentStr & "  for key, val in self." & escapeNimKeyword(
-          fieldName) & ":\n"
-      result &= indentStr & "    var entry = newSeq[byte]()\n"
-
-      # Encode Key (field 1)
-      result &= indentStr & "    entry.add(encodeFieldKey(1, " & keyWireType & "))\n"
-      if keyEncode.len > 0:
-        result &= indentStr & "    entry.add(" & keyEncode & "(key))\n"
-      else:
-        # Keys can only be scalar types, so this should be covered, but for safety:
-        result &= indentStr & "    entry.add(toBinary(key))\n"
-
-      # Encode Value (field 2)
-      result &= indentStr & "    entry.add(encodeFieldKey(2, " & valWireType & "))\n"
-      if valEncode.len > 0:
-        result &= indentStr & "    entry.add(" & valEncode & "(val))\n"
-      else:
-        # Value can be message
-        result &= indentStr & "    let valData = toBinary(val)\n"
-        result &= indentStr & "    entry.add(encodeLengthDelimited(valData))\n"
-
-      # Add entry to result (field N)
-      result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtLengthDelimited))\n"
-      result &= indentStr & "    result.add(encodeLengthDelimited(entry))\n"
+        # Add entry to result (field N)
+        result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtLengthDelimited))\n"
+        result &= indentStr & "    result.add(encodeLengthDelimited(entry))\n"
 
   result &= "\n"
 
@@ -377,94 +608,167 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
   result &= indentStr & "    let (fieldNum, wireType) = decodeFieldKey(data, pos)\n"
   result &= indentStr & "    case fieldNum\n"
 
-  for child in node.children:
-    if child.kind == nkField:
-      let fieldNum = child.number
-      let fieldName = child.name
-      let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
-      var protoType = child.value
-      var typeWasRenamed = false
-      # Check if this is a nested type reference
-      for (origName, qualName) in nestedTypeMap:
-        if protoType == origName:
-          protoType = qualName
+  if hasOneof:
+    # Handle oneof fields
+    for oneofNode in oneofFields:
+      for oneofField in oneofNode.children:
+        if oneofField.kind == nkField:
+          let fieldNum = oneofField.number
+          let fieldName = oneofField.name
+          var protoType = oneofField.value
+          
+          var typeWasRenamed = false
+          # Check if this is a nested type reference
+          for (origName, qualName) in nestedTypeMap:
+            if protoType == origName:
+              protoType = qualName
+              typeWasRenamed = true
+              break
+          if node.reanamedTypeNamesInScope.len > 0 and
+              node.reanamedTypeNamesInScope.hasKey(protoType):
+            protoType = node.reanamedTypeNamesInScope[protoType]
+            typeWasRenamed = true
+          else:
+            let root = getRoot(node)
+            if root.globalTypeMap.hasKey(protoType):
+              protoType = root.globalTypeMap[protoType]
+              typeWasRenamed = true
+
+          let decodeProc = getDecodeProc(oneofField.value)
+          let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+          let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+          let isEnum = enumNames.contains(protoType)
+          let wireType = if isEnum: "wtVarint" else: getWireType(oneofField.value)
+          
+          result &= indentStr & "    of " & $fieldNum & ":\n"
+          
+          if wireType == "wtLengthDelimited":
+            # Length-delimited fields
+            result &= indentStr & "      assert wireType == 2\n"
+            result &= indentStr & "      let length = int(decodeVarint(data, pos))\n"
+            if decodeProc.len > 0:
+              result &= indentStr & "      let s = cast[string](data[pos ..< pos+length])\n"
+              result &= indentStr & "      pos += length\n"
+              result &= indentStr & "      result = " & typeName & "(" & 
+                  escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                  ", " & escapeNimKeyword(fieldName) & ": " & decodeProc & "(s))\n"
+            else:
+              # Message type
+              result &= indentStr & "      let msgData = data[pos ..< pos+length]\n"
+              result &= indentStr & "      pos += length\n"
+              result &= indentStr & "      result = " & typeName & "(" & 
+                  escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                  ", " & escapeNimKeyword(fieldName) & ": fromBinary(" & nimType & ", msgData))\n"
+          else:
+            # Varint fields
+            result &= indentStr & "      assert wireType == 0\n"
+            if decodeProc.len > 0:
+              result &= indentStr & "      let v = " & decodeProc & "(data, pos)\n"
+              result &= indentStr & "      result = " & typeName & "(" & 
+                  escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                  ", " & escapeNimKeyword(fieldName) & ": v)\n"
+            elif isEnum:
+              result &= indentStr & "      let v = " & nimType & "(int32(decodeVarint(data, pos)))\n"
+              result &= indentStr & "      result = " & typeName & "(" & 
+                  escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                  ", " & escapeNimKeyword(fieldName) & ": v)\n"
+            else:
+              # Boolean
+              result &= indentStr & "      let b = decodeVarint(data, pos) != 0\n"
+              result &= indentStr & "      result = " & typeName & "(" & 
+                  escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                  ", " & escapeNimKeyword(fieldName) & ": b)\n"
+  else:
+    # Handle regular fields and oneof fields
+    for child in node.children:
+      if child.kind == nkField:
+        let fieldNum = child.number
+        let fieldName = child.name
+        let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
+        var protoType = child.value
+        var typeWasRenamed = false
+        # Check if this is a nested type reference
+        for (origName, qualName) in nestedTypeMap:
+          if protoType == origName:
+            protoType = qualName
+            typeWasRenamed = true
+            break
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(protoType):
+          protoType = node.reanamedTypeNamesInScope[protoType]
           typeWasRenamed = true
-          break
-      if node.reanamedTypeNamesInScope.len > 0 and
-          node.reanamedTypeNamesInScope.hasKey(protoType):
-        protoType = node.reanamedTypeNamesInScope[protoType]
-        typeWasRenamed = true
-      else:
-        let root = getRoot(node)
-        if root.globalTypeMap.hasKey(protoType):
-          protoType = root.globalTypeMap[protoType]
-          typeWasRenamed = true
-
-      let decodeProc = getDecodeProc(child.value)
-      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
-      let nimType = protoTypeToNim(protoType, false, pkgPrefix)
-      let isEnum = enumNames.contains(protoType)
-      result &= indentStr & "    of " & $fieldNum & ":\n"
-      if isRepeated:
-        if decodeProc.len > 0:
-          result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-              ".add(" & decodeProc &
-              "(data, pos))\n"
         else:
-          result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
-          result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-              ".add(fromBinary(" & nimType & ", fieldData))\n"
-      else:
-        if decodeProc.len > 0:
-          result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-              " = " & decodeProc & "(data, pos)\n"
-        elif isEnum:
-          result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-              " = " & nimType &
-              "(decodeInt32(data, pos))\n"
+          let root = getRoot(node)
+          if root.globalTypeMap.hasKey(protoType):
+            protoType = root.globalTypeMap[protoType]
+            typeWasRenamed = true
+
+        let decodeProc = getDecodeProc(child.value)
+        let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+        let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+        let isEnum = enumNames.contains(protoType)
+        result &= indentStr & "    of " & $fieldNum & ":\n"
+        
+        if isRepeated:
+          if decodeProc.len > 0:
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                ".add(" & decodeProc &
+                "(data, pos))\n"
+          else:
+            result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                ".add(fromBinary(" & nimType & ", fieldData))\n"
         else:
-          result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
-          result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-              " = fromBinary(" & nimType & ", fieldData)\n"
+          if decodeProc.len > 0:
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                " = " & decodeProc & "(data, pos)\n"
+          elif isEnum:
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                " = " & nimType &
+                "(decodeInt32(data, pos))\n"
+          else:
+            result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                " = fromBinary(" & nimType & ", fieldData)\n"
 
-    elif child.kind == nkMapField:
-      let fieldNum = child.number
-      let fieldName = child.name
-      let parts = child.value.split(",")
-      var keyType = parts[0].strip()
-      var valType = parts[1].strip()
-      if node.reanamedTypeNamesInScope.len > 0 and
-          node.reanamedTypeNamesInScope.hasKey(valType):
-        valType = node.reanamedTypeNamesInScope[valType]
+      elif child.kind == nkMapField:
+        let fieldNum = child.number
+        let fieldName = child.name
+        let parts = child.value.split(",")
+        var keyType = parts[0].strip()
+        var valType = parts[1].strip()
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(valType):
+          valType = node.reanamedTypeNamesInScope[valType]
 
-      let keyDecode = getDecodeProc(keyType)
-      let valDecode = getDecodeProc(valType)
-      let keyNimType = protoTypeToNim(keyType, false, packagePrefix)
-      let valNimType = protoTypeToNim(valType, false, packagePrefix)
+        let keyDecode = getDecodeProc(keyType)
+        let valDecode = getDecodeProc(valType)
+        let keyNimType = protoTypeToNim(keyType, false, packagePrefix)
+        let valNimType = protoTypeToNim(valType, false, packagePrefix)
 
-      result &= indentStr & "    of " & $fieldNum & ":\n"
-      result &= indentStr & "      let entryData = decodeLengthDelimited(data, pos)\n"
-      result &= indentStr & "      var entryPos = 0\n"
-      result &= indentStr & "      var key: " & keyNimType & "\n"
-      result &= indentStr & "      var val: " & valNimType & "\n"
-      result &= indentStr & "      while entryPos < entryData.len:\n"
-      result &= indentStr & "        let (fNum, wType) = decodeFieldKey(entryData, entryPos)\n"
-      result &= indentStr & "        case fNum\n"
-      result &= indentStr & "        of 1:\n"
-      if keyDecode.len > 0:
-        result &= indentStr & "          key = " & keyDecode & "(entryData, entryPos)\n"
-      else:
-        result &= indentStr & "          key = fromBinary(" & keyNimType &
-            ", decodeLengthDelimited(entryData, entryPos))\n"
-      result &= indentStr & "        of 2:\n"
-      if valDecode.len > 0:
-        result &= indentStr & "          val = " & valDecode & "(entryData, entryPos)\n"
-      else:
-        result &= indentStr & "          let valData = decodeLengthDelimited(entryData, entryPos)\n"
-        result &= indentStr & "          val = fromBinary(" & valNimType &
-            ", valData)\n"
-      result &= indentStr & "        else: discard\n"
-      result &= indentStr & "      result." & escapeNimKeyword(fieldName) & "[key] = val\n"
+        result &= indentStr & "    of " & $fieldNum & ":\n"
+        result &= indentStr & "      let entryData = decodeLengthDelimited(data, pos)\n"
+        result &= indentStr & "      var entryPos = 0\n"
+        result &= indentStr & "      var key: " & keyNimType & "\n"
+        result &= indentStr & "      var val: " & valNimType & "\n"
+        result &= indentStr & "      while entryPos < entryData.len:\n"
+        result &= indentStr & "        let (fNum, wType) = decodeFieldKey(entryData, entryPos)\n"
+        result &= indentStr & "        case fNum\n"
+        result &= indentStr & "        of 1:\n"
+        if keyDecode.len > 0:
+          result &= indentStr & "          key = " & keyDecode & "(entryData, entryPos)\n"
+        else:
+          result &= indentStr & "          key = fromBinary(" & keyNimType &
+              ", decodeLengthDelimited(entryData, entryPos))\n"
+        result &= indentStr & "        of 2:\n"
+        if valDecode.len > 0:
+          result &= indentStr & "          val = " & valDecode & "(entryData, entryPos)\n"
+        else:
+          result &= indentStr & "          let valData = decodeLengthDelimited(entryData, entryPos)\n"
+          result &= indentStr & "          val = fromBinary(" & valNimType &
+              ", valData)\n"
+        result &= indentStr & "        else: discard\n"
+        result &= indentStr & "      result." & escapeNimKeyword(fieldName) & "[key] = val\n"
 
   result &= indentStr & "    else:\n"
   result &= indentStr & "      discard\n\n"
@@ -472,27 +776,239 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
   # toJson proc
   result &= indentStr & "proc toJson*(self: " & typeName & "): JsonNode =\n"
   result &= indentStr & "  result = newJObject()\n"
-
-  for child in node.children:
-    if child.kind == nkField:
-      let fieldName = child.name
-      result &= indentStr & "  result[\"" & fieldName & "\"] = %self." &
-          escapeNimKeyword(fieldName) & "\n"
-
-    elif child.kind == nkMapField:
-      let fieldName = child.name
-      result &= indentStr & "  var " & fieldName & "Json = newJObject()\n"
-      result &= indentStr & "  for key, val in self." & escapeNimKeyword(
-          fieldName) & ":\n"
-      result &= indentStr & "    " & fieldName & "Json[$key] = %val\n"
-      result &= indentStr & "  result[\"" & fieldName & "\"] = " & fieldName & "Json\n"
+  
+  if hasOneof:
+    # For oneof fields, we generate a case statement
+    result &= indentStr & "  case self." & escapeNimKeyword("resultKind") & "\n"
+    
+    # Handle the none case
+    result &= indentStr & "  of rkNone:\n"
+    result &= indentStr & "    discard\n"
+    
+    # Handle each oneof field
+    for oneofNode in oneofFields:
+      for oneofField in oneofNode.children:
+        if oneofField.kind == nkField:
+          let fieldName = oneofField.name
+          result &= indentStr & "  of rk" & capitalizeTypeName(fieldName) & ":\n"
+          result &= indentStr & "    result[\"" & fieldName & "\"] = %self." &
+              escapeNimKeyword(fieldName) & "\n"
+  else:
+    # Handle regular fields
+    for child in node.children:
+      if child.kind == nkField:
+        let fieldName = child.name
+        result &= indentStr & "  result[\"" & fieldName & "\"] = %self." &
+            escapeNimKeyword(fieldName) & "\n"
+      elif child.kind == nkMapField:
+        let fieldName = child.name
+        result &= indentStr & "  var " & fieldName & "Json = newJObject()\n"
+        result &= indentStr & "  for key, val in self." & escapeNimKeyword(
+            fieldName) & ":\n"
+        result &= indentStr & "    " & fieldName & "Json[$key] = %val\n"
+        result &= indentStr & "  result[\"" & fieldName & "\"] = " & fieldName & "Json\n"
 
   result &= "\n"
 
   # fromJson proc
   result &= indentStr & "proc fromJson*(T: typedesc[" & typeName &
       "], node: JsonNode): " & typeName & " =\n"
-  result &= indentStr & "  discard\n"
+  
+  if hasOneof:
+    # For oneof fields, check each field in order
+    var first = true
+    for oneofNode in oneofFields:
+      for oneofField in oneofNode.children:
+        if oneofField.kind == nkField:
+          let fieldName = oneofField.name
+          var protoType = oneofField.value
+          
+          var typeWasRenamed = false
+          # Qualify nested types
+          for (origName, qualName) in nestedTypeMap:
+            if protoType == origName:
+              protoType = qualName
+              typeWasRenamed = true
+          # Apply renamed type names from scope
+          if node.reanamedTypeNamesInScope.len > 0 and
+              node.reanamedTypeNamesInScope.hasKey(protoType):
+            protoType = node.reanamedTypeNamesInScope[protoType]
+            typeWasRenamed = true
+          else:
+            let root = getRoot(node)
+            if root.globalTypeMap.hasKey(protoType):
+              protoType = root.globalTypeMap[protoType]
+              typeWasRenamed = true
+
+          let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+          
+          let condition = "node.hasKey(\"" & fieldName & "\")"
+          let keyword = if first: "  if " else: "  elif "
+          first = false
+          
+          result &= indentStr & keyword & condition & ":\n"
+          
+          case oneofField.value
+          of "string":
+            result &= indentStr & "    result = " & typeName & "(" & 
+                escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                ", " & escapeNimKeyword(fieldName) & ": node[\"" & fieldName & "\"].getStr)\n"
+          of "int32", "int64":
+            result &= indentStr & "    result = " & typeName & "(" & 
+                escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                ", " & escapeNimKeyword(fieldName) & ": " & 
+                protoTypeToNim(oneofField.value, false, packagePrefix) & 
+                "(node[\"" & fieldName & "\"].getInt))\n"
+          of "uint32", "uint64":
+            result &= indentStr & "    result = " & typeName & "(" & 
+                escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                ", " & escapeNimKeyword(fieldName) & ": " & 
+                protoTypeToNim(oneofField.value, false, packagePrefix) & 
+                "(node[\"" & fieldName & "\"].getInt))\n"
+          of "bool":
+            result &= indentStr & "    result = " & typeName & "(" & 
+                escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                ", " & escapeNimKeyword(fieldName) & ": node[\"" & fieldName & "\"].getBool)\n"
+          of "float", "double":
+            result &= indentStr & "    result = " & typeName & "(" & 
+                escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                ", " & escapeNimKeyword(fieldName) & ": " & 
+                protoTypeToNim(oneofField.value, false, packagePrefix) & 
+                "(node[\"" & fieldName & "\"].getFloat))\n"
+          else:
+            # Message type
+            let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+            result &= indentStr & "    result = " & typeName & "(" & 
+                escapeNimKeyword("resultKind") & ": rk" & capitalizeTypeName(fieldName) & 
+                ", " & escapeNimKeyword(fieldName) & ": fromJson(" & nimType & 
+                ", node[\"" & fieldName & "\"]))\n"
+    
+    result &= indentStr & "  else:\n"
+    result &= indentStr & "    result = " & typeName & "(" & 
+        escapeNimKeyword("resultKind") & ": rkNone)\n"
+  else:
+    result &= indentStr & "  discard\n"
+    # Handle regular fields
+    for child in node.children:
+      if child.kind == nkField:
+        let fieldName = child.name
+        var protoType = child.value
+        let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
+
+        var typeWasRenamed = false
+        # Qualify nested types
+        for (origName, qualName) in nestedTypeMap:
+          if protoType == origName:
+            protoType = qualName
+            typeWasRenamed = true
+        # Apply renamed type names from scope
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(protoType):
+          protoType = node.reanamedTypeNamesInScope[protoType]
+          typeWasRenamed = true
+        else:
+          let root = getRoot(node)
+          if root.globalTypeMap.hasKey(protoType):
+            protoType = root.globalTypeMap[protoType]
+            typeWasRenamed = true
+
+        let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+
+        result &= indentStr & "  if node.hasKey(\"" & fieldName & "\"):\n"
+
+        if isRepeated:
+          result &= indentStr & "    for item in node[\"" & fieldName & "\"]:\n"
+          case child.value
+          of "string":
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & ".add(item.getStr())\n"
+          of "int32", "int64":
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                ".add(" & protoTypeToNim(child.value, false, packagePrefix) & "(item.getInt()))\n"
+          of "uint32", "uint64":
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                ".add(" & protoTypeToNim(child.value, false, packagePrefix) & "(item.getInt()))\n"
+          of "bool":
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & ".add(item.getBool())\n"
+          of "float", "double":
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                ".add(" & protoTypeToNim(child.value, false, packagePrefix) & "(item.getFloat()))\n"
+          else:
+            # Message type
+            let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+                ".add(fromJson(" & nimType & ", item))\n"
+        else:
+          case child.value
+          of "string":
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = node[\"" & fieldName & "\"].getStr()\n"
+          of "int32", "int64":
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = " & protoTypeToNim(child.value, false, packagePrefix) &
+                    "(node[\"" & fieldName &
+                "\"].getInt())\n"
+          of "uint32", "uint64":
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = " & protoTypeToNim(child.value, false, packagePrefix) &
+                    "(node[\"" & fieldName &
+                "\"].getInt())\n"
+          of "bool":
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = node[\"" & fieldName & "\"].getBool()\n"
+          of "float", "double":
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = " & protoTypeToNim(child.value, false, packagePrefix) &
+                    "(node[\"" & fieldName &
+                "\"].getFloat())\n"
+          else:
+            # Message type
+            let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = fromJson(" & nimType & ", node[\"" & fieldName & "\"])\n"
+
+      elif child.kind == nkMapField:
+        let fieldName = child.name
+        let parts = child.value.split(",")
+        var keyType = parts[0].strip()
+        var valType = parts[1].strip()
+        if node.reanamedTypeNamesInScope.len > 0 and
+            node.reanamedTypeNamesInScope.hasKey(valType):
+          valType = node.reanamedTypeNamesInScope[valType]
+        let keyNimType = protoTypeToNim(keyType, false, packagePrefix)
+        let valNimType = protoTypeToNim(valType, false, packagePrefix)
+
+        result &= indentStr & "  if node.hasKey(\"" & fieldName & "\"):\n"
+        result &= indentStr & "    for keyStr, valNode in node[\"" & fieldName & "\"]:\n"
+
+        # Parse Key
+        var keyParser = ""
+        case keyType
+        of "string": keyParser = "keyStr"
+        of "int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
+            "fixed64", "sfixed32", "sfixed64":
+          keyParser = keyNimType & "(parseInt(keyStr))"
+        of "bool": keyParser = "parseBool(keyStr)"
+        else: keyParser = "keyStr" # Should not happen for map keys
+
+        result &= indentStr & "      let key = " & keyParser & "\n"
+
+        # Parse Value
+        var valParser = ""
+        case valType
+        of "string": valParser = "valNode.getStr()"
+        of "int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
+            "fixed64", "sfixed32", "sfixed64":
+          valParser = valNimType & "(valNode.getInt())"
+        of "bool": valParser = "valNode.getBool()"
+        of "float", "double": valParser = valNimType & "(valNode.getFloat())"
+        else:
+          # Message type
+          valParser = "fromJson(" & valNimType & ", valNode)"
+
+        result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+            "[key] = " & valParser & "\n"
+
+  result &= "\n\n"
 
   for child in node.children:
     if child.kind == nkField:
@@ -824,7 +1340,7 @@ proc generateTypes*(ast: ProtoNode): string =
   ##
   ast.renameSubmessageTypeNames() # get child-parent links, renamedTypeNamesInCurrentScope
 
-  result = "import nimproto3\n# Generated from protobuf\n"
+  result = "import nimproto3\n\n\n# Generated from protobuf\n"
   # result &= "type\n"
 
   var nestedTypes: seq[string] = @[]
