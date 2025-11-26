@@ -40,7 +40,7 @@ proc proto3Impl(proto_code: NimNode, searchDirs: seq[string]): NimNode {.compile
     when defined(windows):
         let filename = currentSourcePath().parentDir() & "\\tmp.proto"
     else:
-        let filename = "/tmp/tmp.proto"
+        let filename = currentSourcePath().parentDir() & "/tmp.proto"
     writeFile(filename, proto_code.strVal)
 
     try:
