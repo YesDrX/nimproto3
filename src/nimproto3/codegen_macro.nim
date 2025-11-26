@@ -6,7 +6,11 @@ export wire_format, json, tables, strutils
 proc importProtoImpl(file: string, searchDirs: seq[string]): NimNode =
     # var cmdPath = staticExec("which protonim")
     # if cmdPath.len == 0:
-    const protonimPath = currentSourcePath().parentDir() / "../tools/protonim.nim"
+    when defined(windows):
+        const protonimPath = currentSourcePath().parentDir() / "\\..\\tools\\protonim.nim"
+    else:
+        const protonimPath = currentSourcePath().parentDir() & "/../tools/protonim.nim"
+    
     var cmdPath = "nim r " & protonimPath
     var cmd = cmdPath & " -i " & file
     if searchDirs.len > 0:
@@ -31,26 +35,34 @@ macro importProto3*(file: static[string], searchDirs: static[seq[
         string]]): untyped =
     result = importProtoImpl(file, searchDirs)
 
-proc proto3Impl(proto_code: string, searchDirs: seq[string]): NimNode =
+proc proto3Impl(proto_code: NimNode, searchDirs: seq[string]): NimNode {.compileTime.} =
     var success = false
+    when defined(windows):
+        let filename = currentSourcePath().parentDir() & "\\tmp.proto"
+    else:
+        let filename = "/tmp/tmp.proto"
+    writeFile(filename, proto_code.strVal)
+
     try:
-        discard staticExec("rm -f ./tmp.proto")
-        for line in proto_code.splitLines:
-            discard staticExec(fmt"""echo '{line}' >> ./tmp.proto""")
-        result = importProtoImpl("./tmp.proto", searchDirs)
+        result = importProtoImpl(filename, searchDirs)
         success = true
     except Exception as e:
-        echo "Failed to generate code from proto code: \n" & proto_code & "\n" & e.msg
+        echo "Failed to generate code from proto code: \n" & proto_code.strVal & "\n" & e.msg
     finally:
-        discard staticExec("rm -f ./tmp.proto")
+        when defined(windows):
+            let cmd = "powershell.exe -NoProfile -Command Remove-Item -Force \"" & filename & "\""
+        else:
+            let cmd = "rm \"" & filename & "\""
+        echo "[nimproto3] Running command: " & cmd
+        echo staticExec(cmd)
 
     if not success:
-        raise newException(ValueError, "Failed to generate code from proto code: \n" & proto_code)
+        raise newException(ValueError, "Failed to generate code from proto code: \n" & proto_code.strVal)
 
-macro proto3*(proto_code: static[string]): untyped =
+macro proto3*(proto_code: untyped): untyped =
     result = proto3Impl(proto_code, @[])
 
-macro proto3*(proto_code: static[string], searchDirs: static[seq[
+macro proto3*(proto_code: untyped, searchDirs: static[seq[
         string]]): untyped =
     result = proto3Impl(proto_code, searchDirs)
 
