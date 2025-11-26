@@ -1,0 +1,9 @@
+syntax = "proto3";
+package multiple_import_3;
+
+import "multiple_import_1.proto";
+
+message TypeMultipleImport3 {
+  CommonType common = 1;
+  TypeMultipleImport1 typeMultipleImport1 = 2;
+}

@@ -3,8 +3,10 @@ package multiple_import;
 
 import "multiple_import_1.proto";
 import "multiple_import_2.proto";
+import "multiple_import_3.proto";
 
 message MultipleImport {
   TypeMultipleImport1 fldFromMultipleImport1 = 1;
   TypeMultipleImport2 fldFromMultipleImport2 = 2;
+  TypeMultipleImport3 fldFromMultipleImport3 = 3;
 }

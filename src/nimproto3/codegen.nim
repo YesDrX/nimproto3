@@ -824,7 +824,7 @@ proc generateTypes*(ast: ProtoNode): string =
   ##
   ast.renameSubmessageTypeNames() # get child-parent links, renamedTypeNamesInCurrentScope
 
-  result = "# Generated from protobuf\n"
+  result = "import nimproto3\n# Generated from protobuf\n"
   # result &= "type\n"
 
   var nestedTypes: seq[string] = @[]
@@ -986,15 +986,19 @@ proc generateTypes*(ast: ProtoNode): string =
     if child.kind == nkService:
       result &= generateService(child, "")
 
-proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[]): string =
-  let ast = parseProto(protoString, searchDirs)
+proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[],
+    extraImportPackages: seq[string] = @[]): string =
+  let ast = parseProto(protoString, searchDirs,
+      extraImportPackages = extraImportPackages)
   return generateTypes(ast)
 
-proc genCodeFromProtoFile*(filePath: string, searchDirs: seq[string] = @[]): string =
+proc genCodeFromProtoFile*(filePath: string, searchDirs: seq[string] = @[],
+    extraImportPackages: seq[string] = @[]): string =
   if not fileExists(filePath):
     raise newException(ValueError, "File does not exist: " & filePath)
 
   var fullSearchDirs = searchDirs
   fullSearchDirs.add(parentDir(filePath))
-  let ast = parseProto(readFile(filePath), fullSearchDirs)
+  let ast = parseProto(readFile(filePath), fullSearchDirs,
+      extraImportPackages = extraImportPackages)
   return generateTypes(ast)

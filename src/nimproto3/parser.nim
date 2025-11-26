@@ -31,7 +31,8 @@ proc resolvePath(filename: string, searchDirs: seq[
 
 # Forward declaration
 proc parseProto*(content: string, searchDirs: seq[string] = @[],
-    cache: ref Table[string, ProtoNode] = nil): ProtoNode
+    cache: ref Table[string, ProtoNode] = nil, extraImportPackages: seq[
+        string] = @[]): ProtoNode
 
 let parser* = peg("proto", s: ParserState):
   # Basic tokens
@@ -341,7 +342,28 @@ proc parseProto*(content: string, searchDirs: seq[string] = @[],
   else:
     s.cache = newTable[string, ProtoNode]()
 
-  let res = parser.match(content, s)
-  if not res.ok:
-    raise newException(ValueError, "Failed to parse proto file at index " & $res.matchMax)
-  result = s.root
+  if extraImportPackages.len > 0:
+    var protoContent = content.splitLines()
+    var modifiedProtoContent: seq[string]
+    # modify code to add extra import statements
+    var idx = -1
+    for line in protoContent:
+      idx += 1
+      if line.strip().startswith("syntax") or line.strip().startswith(
+          "package") or line.strip().startswith("//"):
+        continue
+      else:
+        break
+    modifiedProtoContent = protoContent[0 ..< idx]
+    for pkg in extraImportPackages:
+      modifiedProtoContent.add("import \"" & pkg & "\";\n")
+    modifiedProtoContent.add(protoContent[idx ..< protoContent.len])
+    let res = parser.match(modifiedProtoContent.join("\n"), s)
+    if not res.ok: raise newException(ValueError,
+        "Failed to parse proto file at index " & $res.matchMax)
+    result = s.root
+  else:
+    let res = parser.match(content, s)
+    if not res.ok: raise newException(ValueError,
+        "Failed to parse proto file at index " & $res.matchMax)
+    result = s.root

@@ -7,8 +7,9 @@
 import strutils
 import ../nimproto3/[codegen]
 
-proc main(input: string, output: string = "", searchDirs: seq[string] = @[]) =
-  let nimCode = genCodeFromProtoFile(input, searchDirs)
+proc main(input: string, output: string = "", searchDirs: seq[string] = @[],
+    extraImportPackages: seq[string] = @[]) =
+  let nimCode = genCodeFromProtoFile(input, searchDirs, extraImportPackages)
 
   # Output
   if output.len > 0:
@@ -18,4 +19,8 @@ proc main(input: string, output: string = "", searchDirs: seq[string] = @[]) =
 
 when isMainModule:
   import cligen
-  cligen.dispatch(main, short = {"input": 'i', "output": 'o'})
+  cligen.dispatch(main, short = {"input": 'i', "output": 'o',
+      "extraImportPackages": 'p'}, help = {
+      "extraImportPackages": "Extra import packages to add to the generated code. For example: -p google.protobuf.any -p google.protobuf.duration",
+      "searchDirs": "Search directories for imported proto files. For example: -s /path/to/protos -s /path/to/other/protos",
+      "output": "Output file. If not specified, prints to stdout"})
