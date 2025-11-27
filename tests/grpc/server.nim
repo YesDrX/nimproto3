@@ -70,5 +70,6 @@ when isMainModule:
   server.registerHandler("/TestService/SimpleTest", handleSimpleTest)
   server.registerHandler("/TestService/StreamTest", handleStreamTest)
 
+
   echo "Starting gRPC Server (Stream Architecture)..."
   waitFor server.serve()

@@ -61,7 +61,8 @@ proc protoTypeToNim*(typeName: string, isRepeated: bool = false,
   else:
     # Custom type - use the type name directly
     # Handle qualified names like "google.protobuf.Timestamp"
-    if packagePrefix.len > 0 and not typeName.contains(".") and not typeName.startsWith(packagePrefix & "_"):
+    if packagePrefix.len > 0 and not typeName.contains(".") and
+        not typeName.startsWith(packagePrefix & "_"):
       baseType = capitalizeTypeName(packagePrefix & "_" & typeName)
     else:
       baseType = capitalizeTypeName(typeName.replace(".", "_"))
@@ -158,7 +159,7 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
       let oneofKindName = typeName & capitalizeTypeName(oneofNode.name) & "Kind"
       enumDefs &= oneofKindName & "* = enum\n"
       enumDefs &= "  rkNone  # nothing set\n"
-      
+
       for field in oneofNode.children:
         if field.kind == nkField:
           let fieldName = field.name
@@ -166,10 +167,10 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
 
     # Generate the enum definition before the object definition
     result = enumDefs & "\n"
-    
+
     # Now generate the main object with oneof variant fields
     result &= typeName & "* = object\n"
-    
+
     # First, generate regular fields (non-oneof)
     for child in node.children:
       case child.kind
@@ -220,8 +221,8 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
             valBase = node.reanamedTypeNamesInScope[valBase]
           let keyType = protoTypeToNim(keyBase, false, packagePrefix)
           let valType = protoTypeToNim(valBase, false, packagePrefix)
-          result &= "  " & escapeNimKeyword(child.name) & "*: Table[" & keyType &
-              ", " & valType & "]\n"
+          result &= "  " & escapeNimKeyword(child.name) & "*: Table[" &
+              keyType & ", " & valType & "]\n"
 
       of nkOneof, nkMessage, nkEnum:
         # Skip these for now - handled separately
@@ -234,13 +235,14 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
     for oneofNode in oneofFields:
       let oneofName = oneofNode.name
       let oneofKindName = typeName & capitalizeTypeName(oneofName) & "Kind"
-      
+
       # Generate the case statement for the variant
-      result &= "  case " & escapeNimKeyword(oneofName & "Kind") & "*: " & oneofKindName & "\n"
-      
+      result &= "  case " & escapeNimKeyword(oneofName & "Kind") & "*: " &
+          oneofKindName & "\n"
+
       # Add the none case
       result &= "  of rkNone: discard\n"
-      
+
       # Add each field in the oneof
       for field in oneofNode.children:
         if field.kind == nkField:
@@ -269,14 +271,14 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
           # Only pass packagePrefix if the type wasn't already qualified
           let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
           let fieldType = protoTypeToNim(fieldTypeName, false, pkgPrefix)
-          
+
           result &= "  of rk" & capitalizeTypeName(fieldName) & ":\n"
           result &= "    " & escapeNimKeyword(fieldName) & "*: " & fieldType & "\n"
-      
+
   else:
     # No oneof fields, generate normally
     result = typeName & "* = object\n"
-    
+
     for child in node.children:
       case child.kind
       of nkField:
@@ -326,8 +328,8 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
             valBase = node.reanamedTypeNamesInScope[valBase]
           let keyType = protoTypeToNim(keyBase, false, packagePrefix)
           let valType = protoTypeToNim(valBase, false, packagePrefix)
-          result &= "  " & escapeNimKeyword(child.name) & "*: Table[" & keyType &
-              ", " & valType & "]\n"
+          result &= "  " & escapeNimKeyword(child.name) & "*: Table[" &
+              keyType & ", " & valType & "]\n"
 
       of nkOneof:
         # Skip oneofs - handled above
@@ -404,7 +406,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
   for child in node.children:
     if child.kind == nkOneof:
       oneofFields.add(child)
-      
+
   let hasOneof = oneofFields.len > 0
 
   # toBinary proc
@@ -417,21 +419,22 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
     for oneofNode in oneofFields:
       let oneofName = oneofNode.name
       let oneofKindName = typeName & capitalizeTypeName(oneofName) & "Kind"
-      
+
       # For oneof fields, we generate a case statement
-      result &= indentStr & "  case self." & escapeNimKeyword(oneofName & "Kind") & "\n"
-      
+      result &= indentStr & "  case self." & escapeNimKeyword(oneofName &
+          "Kind") & "\n"
+
       # Handle the none case
       result &= indentStr & "  of rkNone:\n"
       result &= indentStr & "    discard\n"
-      
+
       # Handle each field in this oneof
       for oneofField in oneofNode.children:
         if oneofField.kind == nkField:
           let fieldNum = oneofField.number
           let fieldName = oneofField.name
           var protoType = oneofField.value
-          
+
           var typeWasRenamed = false
           # Qualify nested types
           for (origName, qualName) in nestedTypeMap:
@@ -453,19 +456,21 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
           let nimType = protoTypeToNim(protoType, false, pkgPrefix)
           let isEnum = enumNames.contains(protoType)
           let wireType = if isEnum: "wtVarint" else: getWireType(protoType)
-          
+
           result &= indentStr & "  of rk" & capitalizeTypeName(fieldName) & ":\n"
-          
+
           if wireType == "wtLengthDelimited":
             # Length-delimited fields (strings, bytes, messages)
             result &= indentStr & "    # field " & $fieldNum & ", wire=2 (length-delimited)\n"
             result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtLengthDelimited))\n"
             if encodeProc.len > 0:
-              result &= indentStr & "    let s = self." & escapeNimKeyword(fieldName) & "\n"
+              result &= indentStr & "    let s = self." & escapeNimKeyword(
+                  fieldName) & "\n"
               result &= indentStr & "    result.add(encodeString(s))\n"
             else:
               # Message type
-              result &= indentStr & "    let msgData = toBinary(self." & escapeNimKeyword(fieldName) & ")\n"
+              result &= indentStr & "    let msgData = toBinary(self." &
+                  escapeNimKeyword(fieldName) & ")\n"
               result &= indentStr & "    result.add(encodeVarint(uint64(msgData.len)))\n"
               result &= indentStr & "    result.add(msgData)\n"
           else:
@@ -473,14 +478,16 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
             result &= indentStr & "    # field " & $fieldNum & ", wire=0 (varint)\n"
             result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtVarint))\n"
             if encodeProc.len > 0:
-              result &= indentStr & "    result.add(" & encodeProc & "(self." & 
+              result &= indentStr & "    result.add(" & encodeProc & "(self." &
                   escapeNimKeyword(fieldName) & "))\n"
             elif isEnum:
-              result &= indentStr & "    result.add(encodeVarint(uint64(int(self." & 
+              result &= indentStr & "    result.add(encodeFieldKey(" &
+                  $fieldNum & ", wtVarint))\n"
+              result &= indentStr & "    result.add(encodeVarint(uint64(int(self." &
                   escapeNimKeyword(fieldName) & "))))\n"
             else:
               # Boolean
-              result &= indentStr & "    result.add(encodeVarint(uint64(self." & 
+              result &= indentStr & "    result.add(encodeVarint(uint64(self." &
                   escapeNimKeyword(fieldName) & ".int)))\n"
 
   # Handle regular fields (both with and without oneof fields)
@@ -491,7 +498,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       for oneofField in oneofNode.children:
         if oneofField.kind == nkField:
           oneofFieldNames.add(oneofField.name)
-  
+
   # Now process regular fields, excluding oneof fields
   for child in node.children:
     case child.kind
@@ -499,7 +506,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       # Skip oneof fields as they're handled above
       if child.name in oneofFieldNames:
         continue
-      
+
       let fieldNum = child.number
       let fieldName = child.name
       var protoType = child.value
@@ -534,27 +541,71 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       let nimType = protoTypeToNim(protoType, false, pkgPrefix)
 
       if isRepeated:
-        result &= indentStr & "  for item in self." & escapeNimKeyword(
-            fieldName) & ":\n"
-        result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum &
-            ", " & wireType & "))\n"
-        if encodeProc.len > 0:
-          result &= indentStr & "    result.add(" & encodeProc & "(item))\n"
+        if encodeProc.len > 0 and protoType != "string" and protoType != "bytes":
+          # Packed repeated field (numeric types)
+          result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
+          result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtLengthDelimited))\n"
+          result &= indentStr & "    var packed: seq[byte] = @[]\n"
+          result &= indentStr & "    for item in self." & escapeNimKeyword(
+              fieldName) & ":\n"
+          result &= indentStr & "      packed.add(" & encodeProc & "(item))\n"
+          result &= indentStr & "    result.add(encodeLengthDelimited(packed))\n"
+        elif enumNames.contains(protoType):
+          # Packed repeated field (enums)
+          result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
+          result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtLengthDelimited))\n"
+          result &= indentStr & "    var packed: seq[byte] = @[]\n"
+          result &= indentStr & "    for item in self." & escapeNimKeyword(
+              fieldName) & ":\n"
+          result &= indentStr & "      packed.add(encodeInt32(int32(item)))\n"
+          result &= indentStr & "    result.add(encodeLengthDelimited(packed))\n"
         else:
-          result &= indentStr & "    let itemData = toBinary(item)\n"
-          result &= indentStr & "    result.add(encodeLengthDelimited(itemData))\n"
+          # Unpacked repeated field (strings, bytes, messages)
+          result &= indentStr & "  for item in self." & escapeNimKeyword(
+              fieldName) & ":\n"
+          result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum &
+              ", " & wireType & "))\n"
+          if encodeProc.len > 0:
+            # String/Bytes
+            result &= indentStr & "    result.add(" & encodeProc & "(item))\n"
+          else:
+            # Message
+            result &= indentStr & "    let itemData = toBinary(item)\n"
+            result &= indentStr & "    result.add(encodeLengthDelimited(itemData))\n"
       else:
         # Regular field
         if encodeProc.len > 0:
-          result &= indentStr & "  result.add(encodeFieldKey(" & $fieldNum &
-              ", " & wireType & "))\n"
-          result &= indentStr & "  result.add(" & encodeProc & "(self." &
-              escapeNimKeyword(fieldName) & "))\n"
+          # Scalar or String/Bytes
+          if protoType == "string" or protoType == "bytes":
+            result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
+            result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum &
+                ", " & wireType & "))\n"
+            result &= indentStr & "    result.add(" & encodeProc & "(self." &
+                escapeNimKeyword(fieldName) & "))\n"
+          elif protoType == "bool":
+            result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ":\n"
+            result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum &
+                ", " & wireType & "))\n"
+            result &= indentStr & "    result.add(" & encodeProc & "(self." &
+                escapeNimKeyword(fieldName) & "))\n"
+          else:
+            # Numeric types (int, float, etc.) - check for 0
+            result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & " != 0:\n"
+            result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum &
+                ", " & wireType & "))\n"
+            result &= indentStr & "    result.add(" & encodeProc & "(self." &
+                escapeNimKeyword(fieldName) & "))\n"
         elif enumNames.contains(protoType):
-          result &= indentStr & "  result.add(encodeInt32(int32(self." &
-              escapeNimKeyword(fieldName) &
-              ")))\n"
+          # Enum - check for default (first value)
+          # Assuming first value is 0/Default. A safer check is != 0 if we assume 0 is default.
+          # Or we can check against the type's default value.
+          # For now, checking against 0 (casted to int) is safe for Proto3 enums where 0 is default.
+          result &= indentStr & "  if int(self." & escapeNimKeyword(fieldName) & ") != 0:\n"
+          result &= indentStr & "    result.add(encodeFieldKey(" & $fieldNum & ", wtVarint))\n"
+          result &= indentStr & "    result.add(encodeInt32(int32(self." &
+              escapeNimKeyword(fieldName) & ")))\n"
         else:
+          # Message - check if serialized data is not empty
           result &= indentStr & "  block:\n"
           result &= indentStr & "    let fieldData = toBinary(self." &
               escapeNimKeyword(fieldName) & ")\n"
@@ -562,7 +613,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
           result &= indentStr & "      result.add(encodeFieldKey(" & $fieldNum &
               ", " & wireType & "))\n"
           result &= indentStr & "      result.add(encodeLengthDelimited(fieldData))\n"
-          
+
     of nkMapField:
       let fieldNum = child.number
       let fieldName = child.name
@@ -606,7 +657,9 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
     of nkOneof:
       # Oneof fields are handled separately
       discard
-    of nkProto, nkSyntax, nkEdition, nkPackage, nkImport, nkOption, nkMessage, nkEnum, nkService, nkEnumField, nkRpc, nkStream, nkComment, nkReserved, nkExtensions, nkGroup:
+    of nkProto, nkSyntax, nkEdition, nkPackage, nkImport, nkOption, nkMessage,
+        nkEnum, nkService, nkEnumField, nkRpc, nkStream, nkComment, nkReserved,
+        nkExtensions, nkGroup:
       # These node kinds are not processed in this context
       discard
 
@@ -650,12 +703,51 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       let nimType = protoTypeToNim(protoType, false, pkgPrefix)
       let isEnum = enumNames.contains(protoType)
       result &= indentStr & "    of " & $fieldNum & ":\n"
-      
+
       if isRepeated:
-        if decodeProc.len > 0:
+        # Check if type is packable (numeric types + enum)
+        # Strings and bytes are NOT packable
+        let isPackable = (decodeProc.len > 0 and protoType != "string" and
+            protoType != "bytes") or isEnum
+
+        if isPackable:
+          # Handle packed or unpacked repeated fields for packable types
+          result &= indentStr & "      if wireType == wtLengthDelimited:\n"
+          result &= indentStr & "        let fieldData = decodeLengthDelimited(data, pos)\n"
+          result &= indentStr & "        var bufPos = 0\n"
+          result &= indentStr & "        while bufPos < fieldData.len:\n"
+          if isEnum:
+            result &= indentStr & "          result." & escapeNimKeyword(
+                fieldName) &
+               ".add(" & nimType & "(decodeInt64(fieldData, bufPos)))\n"
+          elif protoType == "int32" or protoType == "sint32" or protoType == "sfixed32":
+            # Use decodeInt64 for 32-bit signed ints to handle negative varints safely
+            result &= indentStr & "          result." & escapeNimKeyword(
+                fieldName) &
+               ".add(" & nimType & "(decodeInt64(fieldData, bufPos)))\n"
+          else:
+            result &= indentStr & "          result." & escapeNimKeyword(
+                fieldName) &
+               ".add(" & decodeProc & "(fieldData, bufPos))\n"
+
+          result &= indentStr & "      else:\n"
+          if isEnum:
+            result &= indentStr & "        result." & escapeNimKeyword(
+                fieldName) &
+               ".add(" & nimType & "(decodeInt64(data, pos)))\n"
+          elif protoType == "int32" or protoType == "sint32" or protoType == "sfixed32":
+            result &= indentStr & "        result." & escapeNimKeyword(
+                fieldName) &
+               ".add(" & nimType & "(decodeInt64(data, pos)))\n"
+          else:
+            result &= indentStr & "        result." & escapeNimKeyword(
+                fieldName) &
+               ".add(" & decodeProc & "(data, pos))\n"
+        elif decodeProc.len > 0:
+          # Non-packable primitive types (string, bytes)
+          # They are always length delimited but NOT packed
           result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-              ".add(" & decodeProc &
-              "(data, pos))\n"
+              ".add(" & decodeProc & "(data, pos))\n"
         else:
           result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
           result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
@@ -667,7 +759,11 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         elif isEnum:
           result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
               " = " & nimType &
-              "(decodeInt32(data, pos))\n"
+              "(decodeInt64(data, pos))\n"
+        elif protoType == "int32":
+          # Use decodeInt64 -> cast to int32 to safely handle negative Varints
+          result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
+              " = int32(decodeInt64(data, pos))\n"
         else:
           result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
           result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
@@ -718,7 +814,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
 
     else:
       discard
-  
+
   # Handle oneof fields
   for oneofNode in oneofFields:
     let oneofName = oneofNode.name
@@ -727,7 +823,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         let fieldNum = oneofField.number
         let fieldName = oneofField.name
         var protoType = oneofField.value
-        
+
         var typeWasRenamed = false
         # Check if this is a nested type reference
         for (origName, qualName) in nestedTypeMap:
@@ -750,38 +846,48 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         let nimType = protoTypeToNim(protoType, false, pkgPrefix)
         let isEnum = enumNames.contains(protoType)
         let wireType = if isEnum: "wtVarint" else: getWireType(oneofField.value)
-        
+
         result &= indentStr & "    of " & $fieldNum & ":\n"
-        
+
         if wireType == "wtLengthDelimited":
           # Length-delimited fields
           result &= indentStr & "      assert wireType.int == 2\n"
           result &= indentStr & "      let length = int(decodeVarint(data, pos))\n"
           if decodeProc.len > 0:
-            result &= indentStr & "      result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = " & decodeProc & "(data, pos)\n"
+            result &= indentStr & "      result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & " = " & decodeProc & "(data, pos)\n"
           else:
             # Message type
             result &= indentStr & "      let msgData = data[pos ..< pos+length]\n"
             result &= indentStr & "      pos += length\n"
-            result &= indentStr & "      result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = fromBinary(" & nimType & ", msgData)\n"
+            result &= indentStr & "      result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & " = fromBinary(" & nimType & ", msgData)\n"
         else:
           # Varint fields
           result &= indentStr & "      assert wireType.int == 0\n"
           if decodeProc.len > 0:
             result &= indentStr & "      let v = " & decodeProc & "(data, pos)\n"
-            result &= indentStr & "      result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = v\n"
+            result &= indentStr & "      result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & " = v\n"
           elif isEnum:
             result &= indentStr & "      let v = " & nimType & "(int32(decodeVarint(data, pos)))\n"
-            result &= indentStr & "      result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = v\n"
+            result &= indentStr & "      result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & " = v\n"
           else:
             # Boolean
             result &= indentStr & "      let b = decodeVarint(data, pos) != 0\n"
-            result &= indentStr & "      result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = b\n"
+            result &= indentStr & "      result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & " = b\n"
 
   result &= indentStr & "    else:\n"
   result &= indentStr & "      discard\n\n"
@@ -789,17 +895,18 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
   # toJson proc
   result &= indentStr & "proc toJson*(self: " & typeName & "): JsonNode =\n"
   result &= indentStr & "  result = newJObject()\n"
-  
+
   if hasOneof:
     # For oneof fields, we generate a case statement for each oneof
     for oneofNode in oneofFields:
       let oneofName = oneofNode.name
-      result &= indentStr & "  case self." & escapeNimKeyword(oneofName & "Kind") & "\n"
-      
+      result &= indentStr & "  case self." & escapeNimKeyword(oneofName &
+          "Kind") & "\n"
+
       # Handle the none case
       result &= indentStr & "  of rkNone:\n"
       result &= indentStr & "    discard\n"
-      
+
       # Handle each field in this oneof
       for oneofField in oneofNode.children:
         if oneofField.kind == nkField:
@@ -807,7 +914,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
           result &= indentStr & "  of rk" & capitalizeTypeName(fieldName) & ":\n"
           result &= indentStr & "    result[\"" & fieldName & "\"] = %self." &
               escapeNimKeyword(fieldName) & "\n"
-  
+
   # Handle regular fields (both with and without oneof fields)
   for child in node.children:
     case child.kind
@@ -820,9 +927,9 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
             isOneofField = true
             break
         if isOneofField: break
-      
+
       if isOneofField: continue
-      
+
       let fieldName = child.name
       result &= indentStr & "  result[\"" & fieldName & "\"] = %self." &
           escapeNimKeyword(fieldName) & "\n"
@@ -841,19 +948,19 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
   # fromJson proc
   result &= indentStr & "proc fromJson*(T: typedesc[" & typeName &
       "], node: JsonNode): " & typeName & " =\n"
-  
+
   if hasOneof:
     # For oneof fields, check each oneof group independently
     for oneofNode in oneofFields:
       let oneofName = oneofNode.name
       var firstField = true
-      
+
       # Generate if-elif chain for each field in this oneof group
       for oneofField in oneofNode.children:
         if oneofField.kind == nkField:
           let fieldName = oneofField.name
           var protoType = oneofField.value
-          
+
           var typeWasRenamed = false
           # Qualify nested types
           for (origName, qualName) in nestedTypeMap:
@@ -872,46 +979,55 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
               typeWasRenamed = true
 
           let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
-          
+
           let condition = "node.hasKey(\"" & fieldName & "\")"
           let keyword = if firstField: "  if " else: "  elif "
           firstField = false
-          
+
           result &= indentStr & keyword & condition & ":\n"
-          
+
           case oneofField.value
           of "string":
-            result &= indentStr & "    result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "    result." & escapeNimKeyword(fieldName) & " = node[\"" & fieldName & "\"].getStr\n"
+            result &= indentStr & "    result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = node[\"" & fieldName & "\"].getStr\n"
           of "int32", "int64":
-            result &= indentStr & "    result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "    result." & escapeNimKeyword(fieldName) & " = " & 
-                protoTypeToNim(oneofField.value, false, packagePrefix) & 
+            result &= indentStr & "    result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = " & protoTypeToNim(oneofField.value, false, packagePrefix) &
                 "(node[\"" & fieldName & "\"].getInt)\n"
           of "uint32", "uint64":
-            result &= indentStr & "    result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "    result." & escapeNimKeyword(fieldName) & " = " & 
-                protoTypeToNim(oneofField.value, false, packagePrefix) & 
+            result &= indentStr & "    result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = " & protoTypeToNim(oneofField.value, false, packagePrefix) &
                 "(node[\"" & fieldName & "\"].getInt)\n"
           of "bool":
-            result &= indentStr & "    result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "    result." & escapeNimKeyword(fieldName) & " = node[\"" & fieldName & "\"].getBool\n"
+            result &= indentStr & "    result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = node[\"" & fieldName & "\"].getBool\n"
           of "float", "double":
-            result &= indentStr & "    result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "    result." & escapeNimKeyword(fieldName) & " = " & 
-                protoTypeToNim(oneofField.value, false, packagePrefix) & 
+            result &= indentStr & "    result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = " & protoTypeToNim(oneofField.value, false, packagePrefix) &
                 "(node[\"" & fieldName & "\"].getFloat)\n"
           else:
             # Message type
             let nimType = protoTypeToNim(protoType, false, pkgPrefix)
-            result &= indentStr & "    result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "    result." & escapeNimKeyword(fieldName) & " = fromJson(" & nimType & 
-                ", node[\"" & fieldName & "\"])\n"
-      
+            result &= indentStr & "    result." & escapeNimKeyword(oneofName &
+                "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
+            result &= indentStr & "    result." & escapeNimKeyword(fieldName) &
+                " = fromJson(" & nimType & ", node[\"" & fieldName & "\"])\n"
+
       # Add else clause for this oneof group if no fields were set
-      if not firstField:  # Only add if we had fields in this oneof
+      if not firstField: # Only add if we had fields in this oneof
         result &= indentStr & "  else:\n"
-        result &= indentStr & "    result." & escapeNimKeyword(oneofName & "Kind") & " = rkNone\n"
+        result &= indentStr & "    result." & escapeNimKeyword(oneofName &
+            "Kind") & " = rkNone\n"
   else:
     result &= indentStr & "  discard\n"
     # Handle regular fields
@@ -946,23 +1062,28 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
           result &= indentStr & "    for item in node[\"" & fieldName & "\"]:\n"
           case child.value
           of "string":
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & ".add(item.getStr())\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & ".add(item.getStr())\n"
           of "int32", "int64":
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-                ".add(" & protoTypeToNim(child.value, false, packagePrefix) & "(item.getInt()))\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & ".add(" & protoTypeToNim(child.value, false,
+                    packagePrefix) & "(item.getInt()))\n"
           of "uint32", "uint64":
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-                ".add(" & protoTypeToNim(child.value, false, packagePrefix) & "(item.getInt()))\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & ".add(" & protoTypeToNim(child.value, false,
+                    packagePrefix) & "(item.getInt()))\n"
           of "bool":
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & ".add(item.getBool())\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & ".add(item.getBool())\n"
           of "float", "double":
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-                ".add(" & protoTypeToNim(child.value, false, packagePrefix) & "(item.getFloat()))\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & ".add(" & protoTypeToNim(child.value, false,
+                    packagePrefix) & "(item.getFloat()))\n"
           else:
             # Message type
             let nimType = protoTypeToNim(protoType, false, pkgPrefix)
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) &
-                ".add(fromJson(" & nimType & ", item))\n"
+            result &= indentStr & "      result." & escapeNimKeyword(
+                fieldName) & ".add(fromJson(" & nimType & ", item))\n"
         else:
           case child.value
           of "string":
@@ -1245,7 +1366,7 @@ proc generateAllSerializationProcs(node: ProtoNode, prefix: string = "",
   result &= generateSerializationProcs(node, typeName, nestedTypeMap, enumNames,
       packagePrefix, checkDefined)
 
-proc generateService*(node: ProtoNode, packagePrefix: string = ""): string =
+proc generateService*(node: ProtoNode, packageName: string = ""): string =
   ## Generate gRPC client stub procedures from a service definition
   assert node.kind == nkService
 
@@ -1288,8 +1409,10 @@ proc generateService*(node: ProtoNode, packagePrefix: string = ""): string =
         result &= "proc " & procName & "*(c: GrpcChannel, req: " & reqNimType &
             ", metadata: seq[HpackHeader] = @[]): Future[" & respNimType & "] {.async.} =\n"
         result &= "  let binReq = req.toBinary()\n"
-        result &= "  let rawResps = await c.grpcInvoke(\"/" & node.name & "/" &
-            rpcName & "\", @[binReq], metadata)\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq], metadata)\n"
         result &= "  if rawResps.len == 0:\n"
         result &= "    raise newException(ValueError, \"No response received\")\n"
         result &= "  return " & respNimType & ".fromBinary(rawResps[0])\n\n"
@@ -1301,8 +1424,10 @@ proc generateService*(node: ProtoNode, packagePrefix: string = ""): string =
         result &= "  var binReqs: seq[seq[byte]] = @[]\n"
         result &= "  for req in reqs:\n"
         result &= "    binReqs.add(req.toBinary())\n"
-        result &= "  let rawResps = await c.grpcInvoke(\"/" & node.name & "/" &
-            rpcName & "\", binReqs)\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs)\n"
         result &= "  if rawResps.len == 0:\n"
         result &= "    raise newException(ValueError, \"No response received\")\n"
         result &= "  return " & respNimType & ".fromBinary(rawResps[0])\n\n"
@@ -1312,8 +1437,10 @@ proc generateService*(node: ProtoNode, packagePrefix: string = ""): string =
         result &= "proc " & procName & "*(c: GrpcChannel, req: " & reqNimType &
             "): Future[seq[" & respNimType & "]] {.async.} =\n"
         result &= "  let binReq = req.toBinary()\n"
-        result &= "  let rawResps = await c.grpcInvoke(\"/" & node.name & "/" &
-            rpcName & "\", @[binReq])\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq])\n"
         result &= "  result = @[]\n"
         result &= "  for r in rawResps:\n"
         result &= "    result.add(" & respNimType & ".fromBinary(r))\n\n"
@@ -1325,8 +1452,10 @@ proc generateService*(node: ProtoNode, packagePrefix: string = ""): string =
         result &= "  var binReqs: seq[seq[byte]] = @[]\n"
         result &= "  for req in reqs:\n"
         result &= "    binReqs.add(req.toBinary())\n"
-        result &= "  let rawResps = await c.grpcInvoke(\"/" & node.name & "/" &
-            rpcName & "\", binReqs)\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs)\n"
         result &= "  result = @[]\n"
         result &= "  for r in rawResps:\n"
         result &= "    result.add(" & respNimType & ".fromBinary(r))\n\n"
@@ -1524,9 +1653,15 @@ proc generateTypes*(ast: ProtoNode): string =
       discard
 
   # Generate gRPC service stubs
+  var packageName = ""
+  for child in ast.children:
+    if child.kind == nkPackage:
+      packageName = child.name
+      break
+
   for child in ast.children:
     if child.kind == nkService:
-      result &= generateService(child, "")
+      result &= generateService(child, packageName)
 
 proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[],
     extraImportPackages: seq[string] = @[]): string =

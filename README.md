@@ -16,11 +16,13 @@ A Nim implementation of Protocol Buffers 3 (proto3) with support for parsing `.p
     - streaming RPCs
     - unary RPCs
     - Identity/Deflate/Gzip/Zlib/Snappy compression (Zstd not supported)
+    - Huffman decoding for heaaders
   - client
     - streaming RPCs
     - unary RPCs
     - Identity/Deflate/Gzip/Zlib/Snappy compression (Zstd not supported)
     - customized metadata in headers, such as authentication tokens
+    - Huffman decoding for heaaders
 
 ## Installation
 
@@ -142,8 +144,8 @@ when isMainModule:
   let server = newGrpcServer(50051, CompressionGzip)
 
   # Register routes
-  server.registerHandler("/UserService/GetUser", handleGetUser)
-  server.registerHandler("/UserService/ListUsers", handleListUsers)
+  server.registerHandler("/UserService/GetUser", handleGetUser) # "/package_name.UserService/GetUser" if package_name is defined in the .proto file
+  server.registerHandler("/UserService/ListUsers", handleListUsers) # "/package_name.UserService/ListUsers" if package_name is defined in the .proto file
 
   echo "Starting gRPC Server (Stream Architecture)..."
   waitFor server.serve()
@@ -185,7 +187,7 @@ when isMainModule:
 
 - Run
 ```bash
-nim r -d:showGeneratedProto3Code ./tests/grpc_example/server.nim # -d:showGeneratedProto3Code will show generated code during compile time
+nim r -d:showGeneratedProto3Code ./tests/grpc_example/server.nim # -d:showGeneratedProto3Code will show generated code during compile time; # -d:traceGrpc will print out the gRPC network traffic
 nim r -d:showGeneratedProto3Code ./tests/grpc_example/client.nim
 ```
 - Other examples
@@ -197,6 +199,8 @@ nim r -d:showGeneratedProto3Code ./tests/grpc_example/client.nim
     - [client1.py](tests/grpc/client1.py)
     - [client2.py](tests/grpc/client2.py)
     - [client3.py](tests/grpc/client3.py)
+  - to test against grpcbin.bin server:
+    - [test8.nim](tests/test8.nim) # grpcbin DummyClientStream is buggy
 
 ### 2. Using the `proto3` Macro (Inline Schemas)
 
@@ -395,12 +399,14 @@ Imports a `.proto` file and generates Nim types at compile time.
 
 **Parameters:**
 - `filename`: Path to `.proto` file
-- `searchDirs`: Optional directories to search for imported files
+- `searchDirs`: Optional directories to search for imported files; default @[]
+- `extraImportPackages`: Optional list of additional imports to resolve; default @[]
 
 ```nim
 importProto3 "schema.proto"
 # With search directories
 importProto3("schema.proto", @["./protos", "./vendor"])
+importProto3("schema.proto", searchDirs = @["./protos", "./vendor"], extraImportPackages = @["google/protobuf/any.proto"]) # Additional imports
 ```
 
 #### `proto3(schemaString: string, searchDirs: seq[string] = @[])`
@@ -409,6 +415,7 @@ Define proto3 schemas inline without a separate file.
 **Parameters:**
 - `schemaString`: Proto3 schema as a string
 - `searchDirs`: Optional directories to search for imported files
+- `extraImportPackages`: Optional list of additional imports to resolve
 
 ```nim
 proto3 """
@@ -421,7 +428,7 @@ message Test {
 
 ### Runtime Functions
 
-#### `parseProto(content: string, searchDirs: seq[string] = @[]): ProtoNode`
+#### `proc parseProto(content: string, searchDirs: seq[string] = @[]): ProtoNode`
 Parse a proto3 string into an AST.
 
 **Parameters:**
@@ -430,20 +437,23 @@ Parse a proto3 string into an AST.
 
 **Returns:** `ProtoNode` representing the root of the AST
 
-#### `genCodeFromProtoString(protoString: string): string`
+#### `proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[], extraImportPackages: seq[string] = @[]): string`
 Generate Nim code from a proto3 string.
 
 **Parameters:**
 - `protoString`: Proto3 schema as a string
+- `searchDirs`: Optional directories to search for imported files; default @[]
+- `extraImportPackages`: Optional list of additional imports to resolve; default @[]
 
 **Returns:** Generated Nim code as string
 
-#### `genCodeFromProtoFile(protoFile: string, searchDirs: seq[string] = @[]): string`
+#### `proc genCodeFromProtoFile*(filePath: string, searchDirs: seq[string] = @[], extraImportPackages: seq[string] = @[]): string`
 Generate Nim code from a proto3 file.
 
 **Parameters:**
 - `protoFile`: Path to `.proto` file
 - `searchDirs`: Directories to search for imported files
+- `extraImportPackages`: Optional list of additional imports to resolve
 
 **Returns:** Generated Nim code as string
 
@@ -484,7 +494,7 @@ proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
 - Bidirectional: `rpc Method(stream Req) returns (stream Resp)` → `proc method(c: GrpcChannel, reqs: seq[Req]): Future[seq[Resp]]`
 
 **RPC service endpoints:**
-- `test_service.proto:TestService.SimpleTest` → `/TestService/SimpleTest`
+- `test_service.proto:TestService.SimpleTest` → `/TestService/SimpleTest`, or `/package_name.TestService/SimpleTest` if package_name is defined in the .proto file
 - `test_service.proto:TestService.StreamTest` → `/TestService/StreamTest`
 - `user_service.proto:UserService.GetUser` → `/UserService/GetUser`
 - `user_service.proto:UserService.ListUsers` → `/UserService/ListUsers`
@@ -492,6 +502,8 @@ proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
 ## Known Limitations
 
 1. **Multiple imports in one file:** Importing multiple `.proto` files in a single Nim file may cause redefinition errors if they share transitive dependencies. The recommended approach is to import proto files in separate Nim modules.
+
+2. **TLS is not supported:** The library does not currently support TLS encryption for gRPC connections.
 
 ## Development
 
@@ -511,6 +523,10 @@ Enable `-d:showGeneratedProto3Code` to print the generated Nim code during compi
 
 - Prints the command used to generate code and the resulting Nim source.
 - Helps diagnose parsing and codegen issues without writing files.
+
+Enable `-d:traceGrpc` to print the network traffic for gRPC calls. This can be helpful for debugging and understanding the communication between the client and server.
+- Prints the gRPC method being called and the request/response messages.
+- Can be combined with `-d:showGeneratedProto3Code` for more detailed tracing.
 
 Example:
 

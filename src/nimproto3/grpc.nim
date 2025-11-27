@@ -1,5 +1,6 @@
 import std/[asyncdispatch, asyncnet, net, strutils, tables,
     deques, options, json, sequtils, sugar]
+import ./utils/huffman
 import zippy # nimble install zippy
 import supersnappy # nimble install supersnappy
 
@@ -196,14 +197,19 @@ proc decodeInteger(data: seq[byte], startIdx: int, prefixBits: int): tuple[
     if (b and 0x80) == 0: break
   return (value, i)
 
-proc decodeString(data: seq[byte], startIdx: int): tuple[val: string,
-    consumed: int] =
+proc decodeString(data: seq[byte], startIdx: int): tuple[val: string, consumed: int] =
   if startIdx >= data.len: return ("", 0)
+  let huffman = (data[startIdx] and 0x80) != 0
   let (len, consumedLen) = decodeInteger(data, startIdx, 7)
   if startIdx + consumedLen + len > data.len: return ("", data.len - startIdx)
   let strStart = startIdx + consumedLen
-  var s = newString(len)
-  if len > 0: copyMem(addr s[0], unsafeAddr data[strStart], len)
+  let strBytes = data[strStart ..< strStart + len]
+  var s: string
+  if huffman:
+    s = hpackHuffmanDecode(strBytes)
+  else:
+    s = newString(len)
+    if len > 0: copyMem(addr s[0], unsafeAddr data[strStart], len)
   return (s, consumedLen + len)
 
 proc decodeHeaders*(ctx: HpackContext, data: seq[byte]): seq[HpackHeader] =
@@ -245,6 +251,10 @@ proc decodeHeaders*(ctx: HpackContext, data: seq[byte]): seq[HpackHeader] =
       let (val, c) = decodeString(data, i)
       i += c
       res.add((name, val))
+  
+  when defined(traceGrpc):
+    echo "[gRPC] Decoding headers: ", data.toHex
+    echo "[gRPC] Decoded headers: ", res
   return res
 
 # =============================================================================
@@ -443,7 +453,7 @@ proc acceptHttp2*(conn: Http2Connection) {.async.} =
   if prefaceReceived != prefaceExpected:
     conn.socket.close()
     conn.connected = false
-    raise newException(IOError, "Invalid HTTP/2 Preface")
+    raise newException(IOError, "Invalid HTTP/2 Preface : `" & prefaceReceived.toSeq.map(it => it.uint8.toHex).join("") & "` but expect : `" & prefaceExpected.toSeq.map(it => it.uint8.toHex).join("") & "`")
   let settingsPayload: seq[byte] = @[0x00.byte, 0x03.byte, 0x00.byte, 0x00.byte,
       0x00.byte, 0x64.byte]
   await conn.sendFrame(packFrame(SETTINGS, 0, 0, settingsPayload))
@@ -679,6 +689,11 @@ proc handleServerStream(server: GrpcServer, httpStream: Http2Stream) {.async.} =
 
   methodPath = httpStream.headers.getOrDefault(":path", "")
   clientEncoding = httpStream.headers.getOrDefault("grpc-encoding", "identity")
+
+  when defined(traceGrpc):
+    echo "[gRPC] Received headers: ", httpStream.headers
+    echo "[gRPC] Client Encoding: ", clientEncoding
+    echo "[gRPC] Method Path: ", methodPath
 
   if methodPath == "" or not server.handlers.hasKey(methodPath):
     # Method not found
