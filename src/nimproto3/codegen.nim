@@ -1,5 +1,4 @@
-import strutils, os, sets
-import std/[strutils, tables, sets, sequtils]
+import std/[strutils, tables, sets, sequtils, os]
 import ./[ast, parser]
 
 proc capitalizeTypeName(name: string): string =
@@ -62,7 +61,7 @@ proc protoTypeToNim*(typeName: string, isRepeated: bool = false,
   else:
     # Custom type - use the type name directly
     # Handle qualified names like "google.protobuf.Timestamp"
-    if packagePrefix.len > 0 and not typeName.contains("."):
+    if packagePrefix.len > 0 and not typeName.contains(".") and not typeName.startsWith(packagePrefix & "_"):
       baseType = capitalizeTypeName(packagePrefix & "_" & typeName)
     else:
       baseType = capitalizeTypeName(typeName.replace(".", "_"))
@@ -126,6 +125,29 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
   for child in node.children:
     if child.kind == nkOneof:
       oneofFields.add(child)
+
+  # Process nested messages and enums first (common to both branches)
+  for child in node.children:
+    case child.kind
+    of nkMessage:
+      # Nested message - generate it separately with qualified name
+      let nestedPrefix = if prefix.len > 0:
+        prefix & "_" & node.name
+      else:
+        node.name
+      nestedTypes.add(generateMessage(child, nestedPrefix, nestedTypes,
+          packagePrefix))
+
+    of nkEnum:
+      # Nested enum - generate it separately with qualified name
+      let nestedPrefix = if prefix.len > 0:
+        prefix & "_" & node.name
+      else:
+        node.name
+      nestedTypes.add(generateEnum(child, nestedPrefix))
+
+    else:
+      discard
 
   # If we have oneof fields, we need to generate a variant object
   if oneofFields.len > 0:
@@ -311,48 +333,15 @@ proc generateMessage*(node: ProtoNode, prefix: string = "",
         # Skip oneofs - handled above
         discard
 
-      of nkMessage:
-        # Nested message - generate it separately with qualified name
-        let nestedName = if prefix.len > 0:
-          prefix & "_" & node.name
-        else:
-          node.name
-        nestedTypes.add(generateMessage(child, nestedName, nestedTypes,
-            packagePrefix))
-
-      of nkEnum:
-        # Nested enum - generate it separately with qualified name
-        let nestedName = if prefix.len > 0:
-          prefix & "_" & node.name
-        else:
-          node.name
-        nestedTypes.add(generateEnum(child, nestedName))
+      of nkMessage, nkEnum:
+        # Skip nested types - handled above
+        discard
 
       else:
         discard
 
-  # Handle nested messages and enums (outside of oneof handling)
-  for child in node.children:
-    case child.kind
-    of nkMessage:
-      # Nested message - generate it separately with qualified name
-      let nestedName = if prefix.len > 0:
-        prefix & "_" & node.name
-      else:
-        node.name
-      nestedTypes.add(generateMessage(child, nestedName, nestedTypes,
-          packagePrefix))
-
-    of nkEnum:
-      # Nested enum - generate it separately with qualified name
-      let nestedName = if prefix.len > 0:
-        prefix & "_" & node.name
-      else:
-        node.name
-      nestedTypes.add(generateEnum(child, nestedName))
-
-    else:
-      discard
+  # Nested messages and enums are already handled in the main loop above
+  # No need to process them again here
 
 # Serialization helpers
 proc getWireType(protoType: string): string =
@@ -766,13 +755,11 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         
         if wireType == "wtLengthDelimited":
           # Length-delimited fields
-          result &= indentStr & "      assert wireType == 2\n"
+          result &= indentStr & "      assert wireType.int == 2\n"
           result &= indentStr & "      let length = int(decodeVarint(data, pos))\n"
           if decodeProc.len > 0:
-            result &= indentStr & "      let s = cast[string](data[pos ..< pos+length])\n"
-            result &= indentStr & "      pos += length\n"
             result &= indentStr & "      result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"
-            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = " & decodeProc & "(s)\n"
+            result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = " & decodeProc & "(data, pos)\n"
           else:
             # Message type
             result &= indentStr & "      let msgData = data[pos ..< pos+length]\n"
@@ -781,7 +768,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
             result &= indentStr & "      result." & escapeNimKeyword(fieldName) & " = fromBinary(" & nimType & ", msgData)\n"
         else:
           # Varint fields
-          result &= indentStr & "      assert wireType == 0\n"
+          result &= indentStr & "      assert wireType.int == 0\n"
           if decodeProc.len > 0:
             result &= indentStr & "      let v = " & decodeProc & "(data, pos)\n"
             result &= indentStr & "      result." & escapeNimKeyword(oneofName & "Kind") & " = rk" & capitalizeTypeName(fieldName) & "\n"

@@ -86,14 +86,12 @@ proc fromBinary*(T: typedesc[SampleMessage_SubMessage], data: openArray[byte]): 
     of 10:
       result.detail = decodeString(data, pos)
     of 11:
-      assert wireType == 2
+      assert wireType.int == 2
       let length = int(decodeVarint(data, pos))
-      let s = cast[string](data[pos ..< pos+length])
-      pos += length
       result.error_typeKind = rkError_text
-      result.error_text = decodeString(s)
+      result.error_text = decodeString(data, pos)
     of 12:
-      assert wireType == 0
+      assert wireType.int == 0
       let v = decodeInt32(data, pos)
       result.error_typeKind = rkError_code
       result.error_code = v
@@ -189,31 +187,27 @@ proc fromBinary*(T: typedesc[SampleMessage], data: openArray[byte]): SampleMessa
       let fieldData = decodeLengthDelimited(data, pos)
       result.sub = fromBinary(SampleMessage_SubMessage, fieldData)
     of 1:
-      assert wireType == 2
+      assert wireType.int == 2
       let length = int(decodeVarint(data, pos))
-      let s = cast[string](data[pos ..< pos+length])
-      pos += length
       result.valueKind = rkText
-      result.text = decodeString(s)
+      result.text = decodeString(data, pos)
     of 2:
-      assert wireType == 0
+      assert wireType.int == 0
       let v = decodeInt32(data, pos)
       result.valueKind = rkNumber
       result.number = v
     of 3:
-      assert wireType == 0
+      assert wireType.int == 0
       let v = decodeBool(data, pos)
       result.valueKind = rkCustom_message
       result.custom_message = v
     of 8:
-      assert wireType == 2
+      assert wireType.int == 2
       let length = int(decodeVarint(data, pos))
-      let s = cast[string](data[pos ..< pos+length])
-      pos += length
       result.resultKind = rkMsg
-      result.msg = decodeString(s)
+      result.msg = decodeString(data, pos)
     of 9:
-      assert wireType == 0
+      assert wireType.int == 0
       let v = decodeInt32(data, pos)
       result.resultKind = rkId
       result.id = v
