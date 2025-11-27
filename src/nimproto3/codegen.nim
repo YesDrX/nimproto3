@@ -617,7 +617,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       "], data: openArray[byte]): " & typeName & " =\n"
   result &= indentStr & "  var pos = 0\n"
   result &= indentStr & "  while pos < data.len:\n"
-  result &= indentStr & "    let (fieldNum, wireType) = decodeFieldKey(data, pos)\n"
+  result &= indentStr & "    let (fieldNum, wireType {.used.}) = decodeFieldKey(data, pos)\n"
   result &= indentStr & "    case fieldNum\n"
 
   # Handle regular fields first

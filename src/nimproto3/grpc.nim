@@ -1,5 +1,5 @@
-import std/[asyncdispatch, asyncnet, net, strutils, tables, streams, endians,
-    deques, options, json, monotimes]
+import std/[asyncdispatch, asyncnet, net, strutils, tables,
+    deques, options, json, sequtils, sugar]
 import zippy # nimble install zippy
 import supersnappy # nimble install supersnappy
 
@@ -81,6 +81,10 @@ proc get*[T](q: AsyncQueue[T]): Future[T] =
   else:
     q.waiters.addLast(fut)
   return fut
+
+when defined(traceGrpc):
+  proc toHex(data : seq[byte]): string =
+    data.map(it => it.uint8.toHex).join("")
 
 # --- Compression Helpers ---
 
@@ -328,8 +332,14 @@ proc newHttp2Connection*(host: string, port: int,
 
 proc sendFrame*(conn: Http2Connection, frame: seq[byte]) {.async.} =
   if conn.connected:
-    try: await conn.socket.send(cast[string](frame))
-    except: conn.connected = false
+    try:
+      when defined(traceGrpc):
+        echo "[gRPC] sending frame: ", frame.toHex
+      await conn.socket.send(cast[string](frame))
+      when defined(traceGrpc):
+        echo "[gRPC] frame sent"
+    except:
+      conn.connected = false
 
 proc createStream*(conn: Http2Connection, id: uint32 = 0): Http2Stream =
   new(result)
@@ -471,6 +481,9 @@ proc sendMsg*(stream: GrpcStream, data: seq[byte]) {.async.} =
   var compFlag: byte = if stream.sendCompression !=
       CompressionIdentity: 1 else: 0
 
+  when defined(traceGrpc):
+    echo "[gRPC] sending data: ", data.toHex
+  
   var frameData = newSeq[byte]()
   frameData.add(compFlag)
   let length = finalPayload.len.uint32
@@ -507,8 +520,12 @@ proc recvMsg*(stream: GrpcStream): Future[Option[seq[byte]]] {.async.} =
 
         # Decompress and return
         if isCompressed:
+          when defined(traceGrpc):
+            echo "[gRPC] receiving compressed frame: ", payload.toHex
           return some(decompressPayload(payload, stream.recvEncoding))
         else:
+          when defined(traceGrpc):
+            echo "[gRPC] receiving uncompressed frame: ", payload.toHex
           return some(payload)
 
     # 2. Check if the stream is truly finished.
@@ -526,6 +543,8 @@ proc recvMsg*(stream: GrpcStream): Future[Option[seq[byte]]] {.async.} =
         if status != 0:
           let msg = stream.httpStream.trailers.getOrDefault("grpc-message", "Unknown error")
           raise newException(GrpcError, "gRPC Error " & $status & ": " & msg)
+      when defined(traceGrpc):
+        echo "[gRPC] returning EOF"
       return none(seq[byte])
 
     # 3. Read more events
