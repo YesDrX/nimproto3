@@ -931,19 +931,220 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       if isOneofField: continue
 
       let fieldName = child.name
-      result &= indentStr & "  result[\"" & fieldName & "\"] = %self." &
-          escapeNimKeyword(fieldName) & "\n"
+      let protoType = child.value
+      let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
+
+      if isRepeated:
+        result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
+        result &= indentStr & "    result[\"" & fieldName & "\"] = %self." &
+            escapeNimKeyword(fieldName) & "\n"
+      else:
+        case protoType
+        of "string", "bytes":
+          result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
+          result &= indentStr & "    result[\"" & fieldName & "\"] = %self." &
+              escapeNimKeyword(fieldName) & "\n"
+        of "bool":
+          result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ":\n"
+          result &= indentStr & "    result[\"" & fieldName & "\"] = %self." &
+              escapeNimKeyword(fieldName) & "\n"
+        of "int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
+            "fixed64", "sfixed32", "sfixed64", "float", "double":
+          result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & " != 0:\n"
+          result &= indentStr & "    result[\"" & fieldName & "\"] = %self." &
+              escapeNimKeyword(fieldName) & "\n"
+        else:
+          if enumNames.contains(protoType):
+            result &= indentStr & "  if int(self." & escapeNimKeyword(
+                fieldName) & ") != 0:\n"
+            result &= indentStr & "    result[\"" & fieldName & "\"] = %self." &
+                escapeNimKeyword(fieldName) & "\n"
+          else:
+            # Message type - check if serialized data is not empty
+            # This is a bit expensive (serializing just to check), but accurate.
+            # Alternatively, we could check if it's not default, but for objects that's hard.
+            # A better approach for messages might be to check if it has any set fields,
+            # but that requires a recursive check.
+            # The user suggestion was: "if self.detail.len > 0" for string.
+            # For message, let's use the same logic as toBinary:
+            result &= indentStr & "  block:\n"
+            result &= indentStr & "    let fieldData = toBinary(self." &
+                escapeNimKeyword(fieldName) & ")\n"
+            result &= indentStr & "    if fieldData.len > 0:\n"
+            result &= indentStr & "      result[\"" & fieldName &
+                "\"] = %self." & escapeNimKeyword(fieldName) & "\n"
+
     of nkMapField:
       let fieldName = child.name
-      result &= indentStr & "  var " & fieldName & "Json = newJObject()\n"
-      result &= indentStr & "  for key, val in self." & escapeNimKeyword(
+      result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
+      result &= indentStr & "    var " & fieldName & "Json = newJObject()\n"
+      result &= indentStr & "    for key, val in self." & escapeNimKeyword(
           fieldName) & ":\n"
-      result &= indentStr & "    " & fieldName & "Json[$key] = %val\n"
-      result &= indentStr & "  result[\"" & fieldName & "\"] = " & fieldName & "Json\n"
+      result &= indentStr & "      " & fieldName & "Json[$key] = %val\n"
+      result &= indentStr & "    result[\"" & fieldName & "\"] = " & fieldName & "Json\n"
     else:
       discard
 
   result &= "\n"
+
+  # toJson(seq[byte]) proc
+  result &= indentStr & "proc toJson*(T: typedesc[" & typeName & "], data: openArray[byte]): JsonNode =\n"
+  result &= indentStr & "  result = newJObject()\n"
+  result &= indentStr & "  var pos = 0\n"
+  result &= indentStr & "  while pos < data.len:\n"
+  result &= indentStr & "    let (fieldNum, wireType {.used.}) = decodeFieldKey(data, pos)\n"
+  result &= indentStr & "    case fieldNum\n"
+
+  # Handle fields for binary-to-json conversion
+  # Collect all fields including oneofs
+  var allFields: seq[ProtoNode] = @[]
+  for child in node.children:
+    if child.kind == nkField or child.kind == nkMapField:
+      allFields.add(child)
+    elif child.kind == nkOneof:
+      for oneofChild in child.children:
+        if oneofChild.kind == nkField:
+          allFields.add(oneofChild)
+
+  for child in allFields:
+    case child.kind
+    of nkField:
+      let fieldNum = child.number
+      let fieldName = child.name
+      let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
+      var protoType = child.value
+      var typeWasRenamed = false
+
+      # Resolve type name
+      for (origName, qualName) in nestedTypeMap:
+        if protoType == origName:
+          protoType = qualName
+          typeWasRenamed = true
+          break
+      if node.reanamedTypeNamesInScope.len > 0 and
+          node.reanamedTypeNamesInScope.hasKey(protoType):
+        protoType = node.reanamedTypeNamesInScope[protoType]
+        typeWasRenamed = true
+      else:
+        let root = getRoot(node)
+        if root.globalTypeMap.hasKey(protoType):
+          protoType = root.globalTypeMap[protoType]
+          typeWasRenamed = true
+
+      let decodeProc = getDecodeProc(child.value)
+      let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
+      let nimType = protoTypeToNim(protoType, false, pkgPrefix)
+      let isEnum = enumNames.contains(protoType)
+
+      result &= indentStr & "    of " & $fieldNum & ":\n"
+
+      if isRepeated:
+        # Initialize array if not present
+        result &= indentStr & "      if not result.hasKey(\"" & fieldName & "\"):\n"
+        result &= indentStr & "        result[\"" & fieldName & "\"] = newJArray()\n"
+
+        let isPackable = (decodeProc.len > 0 and protoType != "string" and
+            protoType != "bytes") or isEnum
+
+        if isPackable:
+          result &= indentStr & "      if wireType == wtLengthDelimited:\n"
+          result &= indentStr & "        let fieldData = decodeLengthDelimited(data, pos)\n"
+          result &= indentStr & "        var bufPos = 0\n"
+          result &= indentStr & "        while bufPos < fieldData.len:\n"
+          if isEnum:
+            result &= indentStr & "          result[\"" & fieldName &
+                "\"].add(%(" & nimType & "(decodeInt64(fieldData, bufPos))))\n"
+          elif protoType == "int32" or protoType == "sint32" or protoType == "sfixed32":
+            result &= indentStr & "          result[\"" & fieldName &
+                "\"].add(%(" & nimType & "(decodeInt64(fieldData, bufPos))))\n"
+          else:
+            result &= indentStr & "          result[\"" & fieldName &
+                "\"].add(%" & decodeProc & "(fieldData, bufPos))\n"
+          result &= indentStr & "      else:\n"
+          if isEnum:
+            result &= indentStr & "        result[\"" & fieldName &
+                "\"].add(%(" & nimType & "(decodeInt64(data, pos))))\n"
+          elif protoType == "int32" or protoType == "sint32" or protoType == "sfixed32":
+            result &= indentStr & "        result[\"" & fieldName &
+                "\"].add(%(" & nimType & "(decodeInt64(data, pos))))\n"
+          else:
+            result &= indentStr & "        result[\"" & fieldName &
+                "\"].add(%" & decodeProc & "(data, pos))\n"
+        elif decodeProc.len > 0:
+          # String/Bytes
+          result &= indentStr & "      result[\"" & fieldName & "\"].add(%" &
+              decodeProc & "(data, pos))\n"
+        else:
+          # Message
+          result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
+          result &= indentStr & "      result[\"" & fieldName &
+              "\"].add(toJson(" & nimType & ", fieldData))\n"
+      else:
+        # Scalar field
+        if decodeProc.len > 0:
+          result &= indentStr & "      result[\"" & fieldName & "\"] = %" &
+              decodeProc & "(data, pos)\n"
+        elif isEnum:
+          result &= indentStr & "      result[\"" & fieldName & "\"] = %(" &
+              nimType & "(decodeInt64(data, pos)))\n"
+        elif protoType == "int32":
+          result &= indentStr & "      result[\"" & fieldName & "\"] = %int32(decodeInt64(data, pos))\n"
+        else:
+          # Message
+          result &= indentStr & "      let fieldData = decodeLengthDelimited(data, pos)\n"
+          result &= indentStr & "      result[\"" & fieldName &
+              "\"] = toJson(" & nimType & ", fieldData)\n"
+
+    of nkMapField:
+      let fieldNum = child.number
+      let fieldName = child.name
+      let parts = child.value.split(",")
+      var keyType = parts[0].strip()
+      var valType = parts[1].strip()
+      if node.reanamedTypeNamesInScope.len > 0 and
+          node.reanamedTypeNamesInScope.hasKey(valType):
+        valType = node.reanamedTypeNamesInScope[valType]
+
+      let keyDecode = getDecodeProc(keyType)
+      let valDecode = getDecodeProc(valType)
+      let keyNimType = protoTypeToNim(keyType, false, packagePrefix)
+      let valNimType = protoTypeToNim(valType, false, packagePrefix)
+
+      result &= indentStr & "    of " & $fieldNum & ":\n"
+      result &= indentStr & "      if not result.hasKey(\"" & fieldName & "\"):\n"
+      result &= indentStr & "        result[\"" & fieldName & "\"] = newJObject()\n"
+      result &= indentStr & "      let entryData = decodeLengthDelimited(data, pos)\n"
+      result &= indentStr & "      var entryPos = 0\n"
+      result &= indentStr & "      var key: " & keyNimType & "\n"
+      result &= indentStr & "      var valJson: JsonNode = newJNull()\n"
+
+      result &= indentStr & "      while entryPos < entryData.len:\n"
+      result &= indentStr & "        let (fNum, wType) = decodeFieldKey(entryData, entryPos)\n"
+      result &= indentStr & "        case fNum\n"
+      result &= indentStr & "        of 1:\n"
+      if keyDecode.len > 0:
+        result &= indentStr & "          key = " & keyDecode & "(entryData, entryPos)\n"
+      else:
+        result &= indentStr & "          key = fromBinary(" & keyNimType & ", decodeLengthDelimited(entryData, entryPos))\n"
+
+      result &= indentStr & "        of 2:\n"
+      if valDecode.len > 0:
+        result &= indentStr & "          valJson = %" & valDecode & "(entryData, entryPos)\n"
+      else:
+        # Message type
+        result &= indentStr & "          let valData = decodeLengthDelimited(entryData, entryPos)\n"
+        result &= indentStr & "          valJson = toJson(" & valNimType & ", valData)\n"
+
+      result &= indentStr & "        else: discard\n"
+
+      result &= indentStr & "      result[\"" & fieldName & "\"][key] = valJson\n"
+
+    else:
+      discard
+
+  result &= indentStr & "    else:\n"
+  result &= indentStr & "      discard\n\n"
+
 
   # fromJson proc
   result &= indentStr & "proc fromJson*(T: typedesc[" & typeName &
@@ -1460,6 +1661,67 @@ proc generateService*(node: ProtoNode, packageName: string = ""): string =
         result &= "  for r in rawResps:\n"
         result &= "    result.add(" & respNimType & ".fromBinary(r))\n\n"
 
+      # Generate JSON returning version of the RPC
+      let jsonProcName = procName & "Json"
+
+      if not clientStreaming and not serverStreaming:
+        # Unary: single request -> single response (JsonNode)
+        result &= "proc " & jsonProcName & "*(c: GrpcChannel, req: " &
+            reqNimType &
+            ", metadata: seq[HpackHeader] = @[]): Future[JsonNode] {.async.} =\n"
+        result &= "  let binReq = req.toBinary()\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq], metadata)\n"
+        result &= "  if rawResps.len == 0:\n"
+        result &= "    raise newException(ValueError, \"No response received\")\n"
+        result &= "  return toJson(" & respNimType & ", rawResps[0])\n\n"
+
+      elif clientStreaming and not serverStreaming:
+        # Client streaming: seq[request] -> single response (JsonNode)
+        result &= "proc " & jsonProcName & "*(c: GrpcChannel, reqs: seq[" &
+            reqNimType & "]): Future[JsonNode] {.async.} =\n"
+        result &= "  var binReqs: seq[seq[byte]] = @[]\n"
+        result &= "  for req in reqs:\n"
+        result &= "    binReqs.add(req.toBinary())\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs)\n"
+        result &= "  if rawResps.len == 0:\n"
+        result &= "    raise newException(ValueError, \"No response received\")\n"
+        result &= "  return toJson(" & respNimType & ", rawResps[0])\n\n"
+
+      elif not clientStreaming and serverStreaming:
+        # Server streaming: single request -> seq[response] (seq[JsonNode])
+        result &= "proc " & jsonProcName & "*(c: GrpcChannel, req: " &
+            reqNimType &
+            "): Future[seq[JsonNode]] {.async.} =\n"
+        result &= "  let binReq = req.toBinary()\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq])\n"
+        result &= "  result = @[]\n"
+        result &= "  for r in rawResps:\n"
+        result &= "    result.add(toJson(" & respNimType & ", r))\n\n"
+
+      else:
+        # Bidirectional streaming: seq[request] -> seq[response] (seq[JsonNode])
+        result &= "proc " & jsonProcName & "*(c: GrpcChannel, reqs: seq[" &
+            reqNimType & "]): Future[seq[JsonNode]] {.async.} =\n"
+        result &= "  var binReqs: seq[seq[byte]] = @[]\n"
+        result &= "  for req in reqs:\n"
+        result &= "    binReqs.add(req.toBinary())\n"
+        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
+            "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs)\n"
+        result &= "  result = @[]\n"
+        result &= "  for r in rawResps:\n"
+        result &= "    result.add(toJson(" & respNimType & ", r))\n\n"
+
 proc generateForwardDeclarations(node: ProtoNode, prefix: string = "",
     packagePrefix: string = "", checkDefined: bool = false): string =
   result = ""
@@ -1664,7 +1926,8 @@ proc generateTypes*(ast: ProtoNode): string =
       result &= generateService(child, packageName)
 
 proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[],
-    extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[oldStr : string, newStr : string]] = @[]): string =
+    extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[
+        oldStr: string, newStr: string]] = @[]): string =
   let ast = parseProto(protoString, searchDirs,
       extraImportPackages = extraImportPackages)
   result = generateTypes(ast)
@@ -1672,7 +1935,8 @@ proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[],
     result = result.replace(oldStr, newStr)
 
 proc genCodeFromProtoFile*(filePath: string, searchDirs: seq[string] = @[],
-    extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[oldStr : string, newStr : string]] = @[]): string =
+    extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[
+        oldStr: string, newStr: string]] = @[]): string =
   if not fileExists(filePath):
     raise newException(ValueError, "File does not exist: " & filePath)
 

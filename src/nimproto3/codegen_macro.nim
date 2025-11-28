@@ -32,18 +32,22 @@ proc importProtoImpl(file: string, searchDirs: seq[string],
     result = generatedCode.parseStmt
 
 macro importProto3*(file: static[string]): untyped =
-    result = importProtoImpl(file, @[], @[])
+    result = importProtoImpl(file, @[], @[], @[])
 
 macro importProto3*(file: static[string], searchDirs: static[seq[
         string]]): untyped =
-    result = importProtoImpl(file, searchDirs, @[])
+    result = importProtoImpl(file, searchDirs, @[], @[])
 
 macro importProto3*(file: static[string], searchDirs: static[seq[
         string]], extraImportPackages: static[seq[string]]): untyped =
-    result = importProtoImpl(file, searchDirs, extraImportPackages)
+    result = importProtoImpl(file, searchDirs, extraImportPackages, @[])
+
+macro importProto3*(file: static[string], searchDirs: static[seq[
+        string]], extraImportPackages: static[seq[string]], replaceCode: static[seq[tuple[oldStr : string, newStr : string]]]): untyped =
+    result = importProtoImpl(file, searchDirs, extraImportPackages, replaceCode)
 
 proc proto3Impl(proto_code: NimNode, searchDirs: seq[
-        string], extraImportPackages: seq[string]): NimNode {.compileTime.} =
+        string], extraImportPackages: seq[string], replaceCode: seq[tuple[oldStr : string, newStr : string]]): NimNode {.compileTime.} =
     var success = false
     when defined(windows):
         let filename = currentSourcePath().parentDir() & "\\tmp.proto"
@@ -71,15 +75,19 @@ proc proto3Impl(proto_code: NimNode, searchDirs: seq[
                 proto_code.strVal)
 
 macro proto3*(proto_code: untyped): untyped =
-    result = proto3Impl(proto_code, @[], @[])
+    result = proto3Impl(proto_code, @[], @[], @[])
 
 macro proto3*(proto_code: untyped, searchDirs: static[seq[
         string]]): untyped =
-    result = proto3Impl(proto_code, searchDirs, @[])
+    result = proto3Impl(proto_code, searchDirs, @[], @[])
 
 macro proto3*(proto_code: untyped, searchDirs: static[seq[
         string]], extraImportPackages: static[seq[string]]): untyped =
-    result = proto3Impl(proto_code, searchDirs, extraImportPackages)
+    result = proto3Impl(proto_code, searchDirs, extraImportPackages, @[])
+
+macro proto3*(proto_code: untyped, searchDirs: static[seq[
+        string]], extraImportPackages: static[seq[string]], replaceCode: static[seq[tuple[oldStr : string, newStr : string]]]): untyped =
+    result = proto3Impl(proto_code, searchDirs, extraImportPackages, replaceCode)
 
 # importProto3 "../../tests/protos/maps.proto", @["../../tests/protos"]
 

@@ -88,6 +88,8 @@ importProto3 currentSourcePath.parentDir & "/user_service.proto" # full path to 
 # gRPC client stubs:
 #   - proc getUser*(c: GrpcChannel, req: UserRequest, metadata: seq[HpackHeader] = @[]): Future[User]
 #   - proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
+#   - proc getUserJson*(c: GrpcChannel, req: UserRequest, metadata: seq[HpackHeader] = @[]): Future[JsonNode] # a memory efficient version of getUser for sparse data
+#   - proc listUsersJson*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[JsonNode]] # a memory efficient version of listUsers for sparse data
 
 proc handleGetUser(stream: GrpcStream) {.async.} =
   # 1. Read Request (Unary = Read 1 message)
@@ -499,9 +501,13 @@ proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
 
 **RPC signature mapping:**
 - Unary: `rpc Method(Req) returns (Resp)` → `proc method(c: GrpcChannel, req: Req, metadata: seq[HpackHeader] = @[]): Future[Resp]`
+  - also `proc methodJson(c: GrpcChannel, req: Req, metadata: seq[HpackHeader] = @[]): Future[JsonNode]`, which is useful when data is sparse as fields with default values are skipped in output json node and we parse bytes deirectly into JsonNode rather than bytes->object->json.
 - Client streaming: `rpc Method(stream Req) returns (Resp)` → `proc method(c: GrpcChannel, reqs: seq[Req]): Future[Resp]`
+  - also `proc methodJson(c: GrpcChannel, reqs: seq[Req]): Future[JsonNode]`
 - Server streaming: `rpc Method(Req) returns (stream Resp)` → `proc method(c: GrpcChannel, req: Req): Future[seq[Resp]]`
+  - also `proc methodJson(c: GrpcChannel, req: Req): Future[seq[JsonNode]]`
 - Bidirectional: `rpc Method(stream Req) returns (stream Resp)` → `proc method(c: GrpcChannel, reqs: seq[Req]): Future[seq[Resp]]`
+  - also `proc methodJson(c: GrpcChannel, reqs: seq[Req]): Future[seq[JsonNode]]`
 
 **RPC service endpoints:**
 - `test_service.proto:TestService.SimpleTest` → `/TestService/SimpleTest`, or `/package_name.TestService/SimpleTest` if package_name is defined in the .proto file
