@@ -1,8 +1,34 @@
+# grpc.nim
 import std/[asyncdispatch, asyncnet, net, strutils, tables,
     deques, options, json, sequtils, sugar]
 import ./utils/huffman
-import zippy # nimble install zippy
-import supersnappy # nimble install supersnappy
+import zippy 
+import supersnappy 
+
+# Import OpenSSL for ALPN support when SSL is enabled
+when defined(ssl):
+  import openssl
+
+  # Define ALPN Callback mechanism for Server
+  # SSL_CTX_set_alpn_select_cb is not always exposed by std/openssl, so we define it.
+  proc SSL_CTX_set_alpn_select_cb(ctx: SslCtx, cb: proc (ssl: SslPtr, outProto: ptr cstring, outLen: ptr uint8, inProto: cstring, inLen: cuint, arg: pointer): cint {.cdecl.}, arg: pointer) {.cdecl, dynlib: DLLSSLName, importc.}
+
+  # The Callback Function
+  proc alpn_select_cb(ssl: SslPtr, outProto: ptr cstring, outLen: ptr uint8, inProto: cstring, inLen: cuint, arg: pointer): cint {.cdecl.} =
+    # Look for "h2" in the client's list
+    # Wire format: [len][data][len][data]...
+    var p = cast[ptr UncheckedArray[char]](inProto)
+    var i: cuint = 0
+    while i < inLen:
+      let len = p[i].uint8
+      if i + 1 + len.cuint > inLen: break
+      # Check for "h2" (len=2, 'h', '2')
+      if len == 2 and p[i+1] == 'h' and p[i+2] == '2':
+        outProto[] = cast[cstring](addr p[i+1])
+        outLen[] = 2
+        return 0 # SSL_TLSEXT_ERR_OK
+      i += 1 + len.cuint
+    return 3 # SSL_TLSEXT_ERR_NOACK
 
 # =============================================================================
 # 1. CONSTANTS & ENUMS
@@ -285,7 +311,20 @@ proc packFrame*(ft: FrameType, flags: uint8, streamId: uint32,
 
 proc parseFrameHeader*(data: seq[byte]): Http2Frame =
   let len = (data[0].uint32 shl 16) or (data[1].uint32 shl 8) or data[2].uint32
-  let ft = data[3].FrameType
+  
+  # Validate FrameType to prevent RangeDefect
+  let ftByte = data[3]
+  if ftByte > 9:
+    # If the server sends an invalid frame type, dump some chars for debugging
+    var prefix = ""
+    if data.len >= 4:
+      for k in 0..min(data.len-1, 10):
+        if data[k] >= 32 and data[k] <= 126: prefix.add(chr(data[k]))
+        else: prefix.add(".")
+    raise newException(IOError, "Received invalid HTTP/2 Frame Type: " & $ftByte & 
+        ". The server might be responding with HTTP/1.1 text (Check SSL/ALPN). Header dump: " & prefix)
+
+  let ft = ftByte.FrameType
   let fl = data[4]
   let sid = ((data[5].uint32 and 0x7F) shl 24) or (data[6].uint32 shl 16) or (
       data[7].uint32 shl 8) or data[8].uint32
@@ -327,6 +366,9 @@ type
     loopFuture*: Future[void]
     isServer*: bool
     onNewStream*: OnNewStreamCallback
+    # SSL Settings
+    sslVerify*: bool
+    sslCaFile*: string
 
 proc newHttp2Connection*(host: string, port: int,
     isServer: bool = false): Http2Connection =
@@ -339,6 +381,9 @@ proc newHttp2Connection*(host: string, port: int,
   result.hpack = newHpack()
   result.windowSize = 65535
   result.isServer = isServer
+  # Defaults
+  result.sslVerify = true
+  result.sslCaFile = ""
 
 proc sendFrame*(conn: Http2Connection, frame: seq[byte]) {.async.} =
   if conn.connected:
@@ -434,10 +479,35 @@ proc readLoop*(conn: Http2Connection) {.async.} =
         payload = cast[seq[byte]](payloadStr)
       conn.processFrame(frameHeader, payload)
   except:
-    if conn.connected: discard # echo "Connection error: " & getCurrentExceptionMsg()
+    if conn.connected: 
+      # echo "[gRPC] Connection Error in ReadLoop: " & getCurrentExceptionMsg()
+      discard
     conn.connected = false
 
 proc connect*(conn: Http2Connection) {.async.} =
+  # Enable SSL for Client if defined
+  when defined(ssl):
+    try:
+      # Determine verify mode
+      var verifyMode = CVerifyPeer
+      if not conn.sslVerify:
+        verifyMode = CVerifyNone
+      
+      # Create SSL context with user options
+      # caFile is the trusted certificate bundle. 
+      let ctx = newContext(protVersion = protTLSv1, verifyMode = verifyMode, caFile = conn.sslCaFile)
+      
+      # Enable ALPN "h2" (Required for many gRPC servers)
+      # Wire format: length-prefixed string. \x02h2
+      let alpn = "\x02h2"
+      let sslCtx = ctx.context
+      if SSL_CTX_set_alpn_protos(sslCtx, cast[cstring](alpn.cstring), alpn.len.cuint) != 0:
+         echo "[gRPC] Warning: Failed to set ALPN"
+         
+      ctx.wrapSocket(conn.socket)
+    except CatchableError as e:
+      raise newException(GrpcError, "Failed to initialize SSL for client: " & e.msg)
+
   await conn.socket.connect(conn.host, conn.port)
   conn.connected = true
   await conn.socket.send("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
@@ -539,10 +609,6 @@ proc recvMsg*(stream: GrpcStream): Future[Option[seq[byte]]] {.async.} =
           return some(payload)
 
     # 2. Check if the stream is truly finished.
-    # We only return EOF if:
-    #   a. The stream is marked closed (END_STREAM received).
-    #   b. We don't have enough data in the buffer for a frame.
-    #   c. AND the event queue is empty. (Pending SE_DATA might still be there!)
     if stream.httpStream.closed and
        stream.readBuffer.len < 5 and
        stream.httpStream.eventQueue.items.len == 0:
@@ -558,7 +624,6 @@ proc recvMsg*(stream: GrpcStream): Future[Option[seq[byte]]] {.async.} =
       return none(seq[byte])
 
     # 3. Read more events
-    # If the queue has items, this will return immediately.
     let evt = await stream.httpStream.eventQueue.get()
 
     case evt.kind
@@ -581,15 +646,22 @@ type GrpcChannel* = ref object
   conn*: Http2Connection
   compression*: GrpcCompression
 
+# Updated Constructors to accept SSL Options
 proc newGrpcChannel*(host: string, port: int,
-    compression: GrpcCompression = CompressionIdentity): GrpcChannel =
+    compression: GrpcCompression = CompressionIdentity,
+    sslVerify: bool = true,
+    certFile: string = ""): GrpcChannel =
   new(result)
   result.conn = newHttp2Connection(host, port, false)
+  result.conn.sslVerify = sslVerify
+  result.conn.sslCaFile = certFile
   result.compression = compression
 
 proc newGrpcClient*(host: string, port: int,
-    compression: GrpcCompression = CompressionIdentity): GrpcChannel =
-  newGrpcChannel(host, port, compression)
+    compression: GrpcCompression = CompressionIdentity,
+    sslVerify: bool = true,
+    certFile: string = ""): GrpcChannel =
+  newGrpcChannel(host, port, compression, sslVerify, certFile)
 
 proc connect*(chan: GrpcChannel) {.async.} =
   await chan.conn.connect()
@@ -602,10 +674,15 @@ proc close*(chan: GrpcChannel) =
 proc startRpc*(chan: GrpcChannel, methodPath: string, metadata: seq[
     HpackHeader] = @[]): Future[GrpcStream] {.async.} =
   let stream = chan.conn.createStream()
+  
+  # Determine scheme based on SSL state
+  var scheme = "http"
+  when defined(ssl):
+    if chan.conn.socket.isSsl: scheme = "https"
 
   var headers: seq[HpackHeader] = @[
     (":method", "POST"),
-    (":scheme", "http"),
+    (":scheme", scheme),
     (":path", methodPath),
     (":authority", chan.conn.host & ":" & $chan.conn.port),
     ("content-type", "application/grpc"),
@@ -658,14 +735,19 @@ type GrpcServer* = ref object
   port: int
   handlers: Table[string, RpcHandler]
   preferredResponseCompression: GrpcCompression
+  certFile: string
+  keyFile: string
 
-proc newGrpcServer*(port: int, preferredCompression: GrpcCompression = CompressionIdentity): GrpcServer =
+proc newGrpcServer*(port: int, preferredCompression: GrpcCompression = CompressionIdentity,
+                    certFile: string = "", keyFile: string = ""): GrpcServer =
   new(result)
   result.socket = newAsyncSocket()
   result.socket.setSockOpt(OptReuseAddr, true)
   result.port = port
   result.handlers = initTable[string, RpcHandler]()
   result.preferredResponseCompression = preferredCompression
+  result.certFile = certFile
+  result.keyFile = keyFile
 
 proc registerHandler*(server: GrpcServer, path: string, handler: RpcHandler) =
   server.handlers[path] = handler
@@ -766,6 +848,39 @@ proc serve*(server: GrpcServer, ip: string = "0.0.0.0") {.async.} =
   server.socket.bindAddr(server.port.Port, address = ip)
   server.socket.listen()
   echo "[Server] Listening on ", ip, ":", server.port
+
+  # Pre-load SSL Context if configured and ssl is defined
+  when defined(ssl):
+    var ctx: SslContext
+    let useSsl = server.certFile.len > 0 and server.keyFile.len > 0
+    if useSsl:
+      try:
+        ctx = newContext(certFile = server.certFile, keyFile = server.keyFile)
+        
+        # Enable Server Side ALPN (Negotiate "h2")
+        # This callback is called when the client sends an ALPN extension.
+        # We must select "h2" if available to satisfy gRPC.
+        SSL_CTX_set_alpn_select_cb(ctx.context, alpn_select_cb, nil)
+        
+        echo "[Server] TLS enabled"
+      except CatchableError as e:
+        echo "[Server] Failed to initialize SSL context: ", e.msg
+        quit(1)
+    else:
+      echo "[Server] Using default SSL context"
+      ctx = newContext()
+
   while true:
     let clientSock = await server.socket.accept()
+    
+    when defined(ssl):
+      if useSsl:
+        try:
+          # IMPORTANT: Use handshakeAsServer for incoming connections!
+          ctx.wrapConnectedSocket(clientSock, handshakeAsServer)
+        except CatchableError as e:
+          echo "[Server] SSL wrap error: ", e.msg
+          clientSock.close()
+          continue
+    
     asyncCheck server.processClient(clientSock)

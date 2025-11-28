@@ -1,4 +1,5 @@
 import std/[strutils]
+export strutils
 
 # ============================================================================
 # RFC 7541 Appendix B: Huffman Code Table

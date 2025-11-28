@@ -1,7 +1,7 @@
 import std/[macros, strutils, json, tables, strformat, os]
 import ./[wire_format]
 
-export wire_format, json, tables, strutils
+export wire_format, json, tables, strutils, strformat
 
 proc importProtoImpl(file: string, searchDirs: seq[string],
         extraImportPackages: seq[string]): NimNode =

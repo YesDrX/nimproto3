@@ -1,8 +1,3 @@
-{.define: ssl}
-
-when defined(ssl):
-    echo "SSL is enabled"
-
 import nimproto3
 
 # check the testing server at : https://grpcb.in/
@@ -15,8 +10,8 @@ proc runTests() {.async.} =
     echo "================================================================================"
 
     # Example 1: Identity + Custom Metadata
-    # let client = newGrpcClient("grpcb.in", 9000, CompressionIdentity)
-    let client = newGrpcClient("grpcb.in", 9001, CompressionIdentity) # -d:ssl
+    let client = newGrpcClient("grpcb.in", 9000, CompressionIdentity)
+    # let client = newGrpcClient("grpcb.in", 9001, CompressionIdentity) # -d:ssl
 
     await client.connect()
     await sleepAsync(200) # Wait for settings exchange

@@ -17,12 +17,14 @@ A Nim implementation of Protocol Buffers 3 (proto3) with support for parsing `.p
     - unary RPCs
     - Identity/Deflate/Gzip/Zlib/Snappy compression (Zstd not supported)
     - Huffman decoding for heaaders
+    - TLS support
   - client
     - streaming RPCs
     - unary RPCs
     - Identity/Deflate/Gzip/Zlib/Snappy compression (Zstd not supported)
     - customized metadata in headers, such as authentication tokens
     - Huffman decoding for heaaders
+    - TLS support
 
 ## Installation
 
@@ -502,8 +504,6 @@ proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
 ## Known Limitations
 
 1. **Multiple imports in one file:** Importing multiple `.proto` files in a single Nim file may cause redefinition errors if they share transitive dependencies. The recommended approach is to import proto files in separate Nim modules.
-
-2. **TLS is not supported:** The library does not currently support TLS encryption for gRPC connections.
 
 ## Development
 
