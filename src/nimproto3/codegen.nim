@@ -1739,6 +1739,7 @@ proc generateForwardDeclarations(node: ProtoNode, prefix: string = "",
   result &= indentStr & "proc fromBinary*(T: typedesc[" & typeName &
       "], data: openArray[byte]): " & typeName & "\n"
   result &= indentStr & "proc toJson*(self: " & typeName & "): JsonNode\n"
+  result &= indentStr & "proc toJson*(T: typedesc[" & typeName & "], data: openArray[byte]): JsonNode\n"
   result &= indentStr & "proc fromJson*(T: typedesc[" & typeName &
       "], node: JsonNode): " & typeName & "\n"
   result &= "\n"
