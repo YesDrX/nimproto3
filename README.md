@@ -519,6 +519,28 @@ proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
 
 1. **Multiple imports in one file:** Importing multiple `.proto` files in a single Nim file may cause redefinition errors if they share transitive dependencies. The recommended approach is to import proto files in separate Nim modules.
 
+2. **extensions:** The following proto code won't be parsed:
+```proto
+  extensions 1000 to 9994 [
+    declaration = {
+      number: 1000,
+      full_name: ".pb.cpp",
+      type: ".pb.CppFeatures"
+    },
+    declaration = {
+      number: 1001,
+      full_name: ".pb.java",
+      type: ".pb.JavaFeatures"
+    },
+    declaration = { number: 1002, full_name: ".pb.go", type: ".pb.GoFeatures" },
+    declaration = {
+      number: 9990,
+      full_name: ".pb.proto1",
+      type: ".pb.Proto1Features"
+    }
+  ];
+```
+
 ## Development
 
 ### Running Tests

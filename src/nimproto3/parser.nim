@@ -1,3 +1,4 @@
+# parser.nim
 import npeg, strutils, tables, os
 import ./ast
 
@@ -21,13 +22,24 @@ proc pop(s: var ParserState) =
 proc peek(s: var ParserState): ProtoNode {.used.} =
   if s.stack.len > 0: result = s.stack[^1]
 
-proc resolvePath(filename: string, searchDirs: seq[
-    string]): string =
+proc resolvePath(filename: string, searchDirs: seq[string]): string =
   if fileExists(filename): return filename
   for dir in searchDirs:
     let path = dir / filename
     if fileExists(path): return path
   return ""
+
+# Helper to parse Proto integer formats (Hex, Octal, Decimal)
+proc parseProtoNumber(s: string): int =
+  try:
+    if s.len > 1 and (s.startsWith("0x") or s.startsWith("0X")):
+      result = parseHexInt(s)
+    elif s.len > 1 and s.startsWith("0"):
+      result = parseOctInt(s)
+    else:
+      result = parseInt(s)
+  except ValueError:
+    result = 0 
 
 # Forward declaration
 proc parseProto*(content: string, searchDirs: seq[string] = @[],
@@ -36,8 +48,6 @@ proc parseProto*(content: string, searchDirs: seq[string] = @[],
 
 let parser* = peg("proto", s: ParserState):
   # Basic tokens
-  tkDoubleQuote <- "\""
-  tkSingleQuote <- "'"
   tkSemi <- ";"
   tkEq <- "="
   tkLBrace <- "{"
@@ -60,22 +70,43 @@ let parser* = peg("proto", s: ParserState):
   identStart <- {'a'..'z', 'A'..'Z', '_'}
   identChar <- identStart | {'0'..'9'}
   identifier <- identStart * *identChar
-  # Package identifier segments may contain '-'
+  
   identifierHyphen <- identStart * *(identChar | '-')
   packageFullIdentifier <- identifierHyphen * *('.' * identifierHyphen)
 
   fullIdentifier <- identifier * *('.' * identifier)
 
+  # Integer Literals
+  hexInt <- >("0x" * +Xdigit)
+  octInt <- >("0" * +{'0'..'7'})
   decInt <- > +Digit
-  hexInt <- "0x" * > +Xdigit
-  octInt <- "0" * > +{'0'..'7'}
+  
+  intLit <- hexInt | octInt | decInt
+
   floatLit <- > *Digit * '.' * +Digit * ?(i"e" * ?{'+', '-'} * +Digit)
   boolLit <- >("true" | "false")
 
-  strLit <- tkDoubleQuote * > *(1 - tkDoubleQuote) * tkDoubleQuote |
-            tkSingleQuote * > *(1 - tkSingleQuote) * tkSingleQuote
+  # String Literals
+  # Define content logic: match escaped char OR non-quote char
+  dqContent <- "\\\"" | 1 - {'"'}
+  sqContent <- "\\'" | 1 - {'\''}
+  
+  # Capturing versions (for normal values)
+  dqStr <- '"' * > *dqContent * '"'
+  sqStr <- '\'' * > *sqContent * '\''
+  strLit <- dqStr | sqStr
 
-  constant <- >fullIdentifier | floatLit | decInt | hexInt | octInt | boolLit | strLit
+  # Non-capturing versions (for aggregate skipping to avoid capture pollution)
+  dqStrSkip <- '"' * *dqContent * '"'
+  sqStrSkip <- '\'' * *sqContent * '\''
+  strLitSkip <- dqStrSkip | sqStrSkip
+
+  # Aggregate / Message Literal
+  # Safely consumes content inside {} including nesting and strings
+  # Use strLitSkip to avoid adding captures to the stack which confuses fieldOption
+  aggregate <- "{" * *( strLitSkip | comment | aggregate | 1 - {'{', '}'} ) * "}"
+
+  constant <- >fullIdentifier | floatLit | intLit | boolLit | strLit | >aggregate
 
   # Syntax
   syntax <- "syntax" * S * tkEq * S * strLit * S * tkSemi * S:
@@ -85,7 +116,7 @@ let parser* = peg("proto", s: ParserState):
     s.push(node)
     s.pop()
 
-  # Edition (proto3.21+)
+  # Edition
   edition <- "edition" * S * tkEq * S * strLit * S * tkSemi * S:
     if s.root.isNil:
       s.root = newProtoNode(nkProto)
@@ -94,7 +125,7 @@ let parser* = peg("proto", s: ParserState):
     s.push(node)
     s.pop()
 
-  # Package (allow hyphen in segments)
+  # Package
   package <- "package" * S * >packageFullIdentifier * S * tkSemi * S:
     var node = newProtoNode(nkPackage, name = $1)
     s.push(node)
@@ -104,17 +135,12 @@ let parser* = peg("proto", s: ParserState):
   importStmt <- "import" * S * ?("public" * S | "weak" * S) * strLit * S *
       tkSemi * S:
     var node = newProtoNode(nkImport, value = $1)
-
-    # Resolve and parse import
     let filename = $1
     let path = resolvePath(filename, s.searchDirs)
     if path != "":
       if not s.cache.hasKey(path):
-        # Prevent infinite recursion by adding a placeholder or checking stack?
-        # For now, simple cache check.
         try:
           let content = readFile(path)
-          # Recursive call
           let importedAst = parseProto(content, s.searchDirs, s.cache)
           s.cache[path] = importedAst
           node.children.add(importedAst)
@@ -137,18 +163,8 @@ let parser* = peg("proto", s: ParserState):
     s.pop()
 
   # Field Options
-  # We need to capture options and add them to the field node.
-  # Since field node is created at the end of field rule (currently), we can't add options easily.
-  # But field is a leaf node in terms of structure (it doesn't contain other fields).
-  # So we can keep the current approach for field, BUT we need to handle fieldOptions.
-  # For now, let's just parse fieldOptions but not attach them to AST to avoid complexity,
-  # OR we can use a temporary storage.
-  # Better: Create field node EARLY.
-
   fieldOption <- >optionName * S * tkEq * S * constant:
-    # This runs after option matches.
-    # We need to add this option to the current field node.
-    # This requires the field node to be on the stack!
+    # Captures: $1 = optionName, $2 = constant
     var node = newProtoNode(nkOption, name = $1, value = $2)
     s.push(node)
     s.pop()
@@ -159,25 +175,23 @@ let parser* = peg("proto", s: ParserState):
   # Field
   label <- "repeated" | "optional" | "required"
   type_name <- fullIdentifier
-  fieldNumber <- decInt | hexInt | octInt
+  fieldNumber <- intLit
 
-  # We split field into Start and End to allow fieldOptions to add to it.
   fieldStart <- ?( > label * S) * >type_name * S * >identifier * S * tkEq * S *
       fieldNumber * S:
-    var name, val, num, lbl: string
-    # capture[0] is the whole match
+    var name, val, numStr, lbl: string
     if capture.len == 5:
       lbl = capture[1].s
       val = capture[2].s
       name = capture[3].s
-      num = capture[4].s
+      numStr = capture[4].s
     else:
       val = capture[1].s
       name = capture[2].s
-      num = capture[3].s
+      numStr = capture[3].s
 
     var node = newProtoNode(nkField, name = name, value = val,
-        number = parseInt(num))
+        number = parseProtoNumber(numStr))
     if lbl != "":
       node.attrs.add(newProtoNode(nkOption, name = "label", value = lbl))
     s.push(node)
@@ -192,7 +206,7 @@ let parser* = peg("proto", s: ParserState):
       > type_name * S * tkGreater * S * >identifier * S * tkEq * S *
       fieldNumber * S:
     var node = newProtoNode(nkMapField, name = $3, value = $1 & "," & $2,
-        number = parseInt($4))
+        number = parseProtoNumber($4))
     s.push(node)
 
   mapFieldEnd <- tkSemi * S:
@@ -208,9 +222,8 @@ let parser* = peg("proto", s: ParserState):
   oneofEnd <- tkRBrace * S:
     s.pop()
 
-  # OneofField needs to be adapted too if we want options
   oneofFieldStart <- >type_name * S * >identifier * S * tkEq * S * fieldNumber * S:
-    var node = newProtoNode(nkField, name = $2, value = $1, number = parseInt($3))
+    var node = newProtoNode(nkField, name = $2, value = $1, number = parseProtoNumber($3))
     s.push(node)
 
   oneofFieldEnd <- tkSemi * S:
@@ -221,7 +234,8 @@ let parser* = peg("proto", s: ParserState):
   oneof <- oneofStart * *oneofField * S * oneofEnd
 
   # Reserved
-  range <- >decInt * S * "to" * S * >decInt | >decInt
+  rangeVal <- intLit
+  range <- >rangeVal * S * "to" * S * >rangeVal | >rangeVal
   reserved <- "reserved" * S * (range * *(S * tkComma * S * range) | strLit * *(
       S * tkComma * S * strLit)) * S * tkSemi * S:
     var node = newProtoNode(nkReserved)
@@ -236,8 +250,8 @@ let parser* = peg("proto", s: ParserState):
   enumEnd <- tkRBrace * S:
     s.pop()
 
-  enumFieldStart <- >identifier * S * tkEq * S * >decInt * S:
-    var node = newProtoNode(nkEnumField, name = $1, number = parseInt($2))
+  enumFieldStart <- >identifier * S * tkEq * S * intLit * S:
+    var node = newProtoNode(nkEnumField, name = $1, number = parseProtoNumber($2))
     s.push(node)
 
   enumFieldEnd <- tkSemi * S:
@@ -247,6 +261,25 @@ let parser* = peg("proto", s: ParserState):
 
   enumDef <- enumStart * *(option | enumField | reserved) * enumEnd
 
+  # Extend
+  extendStart <- "extend" * S * >type_name * S * tkLBrace * S:
+    var node = newProtoNode(nkExtend, value = $1)
+    s.push(node)
+
+  extendEnd <- tkRBrace * S:
+    s.pop()
+
+  extendDef <- extendStart * *(field | option) * extendEnd
+
+  # Extensions
+  extensionRangeVal <- "max" | intLit
+  extensionRange <- >extensionRangeVal * S * "to" * S * >extensionRangeVal | >extensionRangeVal
+  
+  extensions <- "extensions" * S * extensionRange * *(S * tkComma * S * extensionRange) * ?fieldOptions * S * tkSemi * S:
+    var node = newProtoNode(nkExtensions)
+    s.push(node)
+    s.pop()
+
   # Message
   messageStart <- "message" * S * >identifier * S * tkLBrace * S:
     var node = newProtoNode(nkMessage, name = $1)
@@ -255,8 +288,8 @@ let parser* = peg("proto", s: ParserState):
   messageEnd <- tkRBrace * S:
     s.pop()
 
-  messageBody <- *(field | mapField | oneof | option | reserved | enumDef |
-      messageDef)
+  messageBody <- *(field | mapField | oneof | option | reserved | extensions | enumDef |
+      messageDef | extendDef)
 
   messageDef <- messageStart * messageBody * messageEnd
 
@@ -303,15 +336,13 @@ let parser* = peg("proto", s: ParserState):
   # Top level
   topLevel <- (syntax | edition) * *(importStmt | package | option |
       messageDef | enumDef |
-      service)
+      service | extendDef)
   proto <- S * topLevel * !1
 
 proc getProtocIncludePath(): string =
   # Try to find protoc in PATH
   let protocPath = findExe("protoc")
   if protocPath.len > 0:
-    # Assuming standard layout: bin/protoc -> include/google/protobuf
-    # So we want the parent of bin, then include.
     let binDir = parentDir(protocPath)
     let prefix = parentDir(binDir)
     let includeDir = prefix / "include"
@@ -324,19 +355,16 @@ proc parseProto*(content: string, searchDirs: seq[string] = @[],
         string] = @[]): ProtoNode =
   var s: ParserState
 
-  # Initialize search dirs with env var
   let envPath = getEnv("PROTO_PATH")
   if envPath.len > 0:
     s.searchDirs.add(envPath.split(PathSep))
 
-  # Add auto-detected protoc include path
   let stdPath = getProtocIncludePath()
   if stdPath.len > 0:
     s.searchDirs.add(stdPath)
 
   s.searchDirs.add(searchDirs)
 
-  # Initialize cache
   if cache != nil:
     s.cache = cache
   else:
@@ -345,7 +373,6 @@ proc parseProto*(content: string, searchDirs: seq[string] = @[],
   if extraImportPackages.len > 0:
     var protoContent = content.splitLines()
     var modifiedProtoContent: seq[string]
-    # modify code to add extra import statements
     var idx = -1
     for line in protoContent:
       idx += 1
@@ -360,10 +387,10 @@ proc parseProto*(content: string, searchDirs: seq[string] = @[],
     modifiedProtoContent.add(protoContent[idx ..< protoContent.len])
     let res = parser.match(modifiedProtoContent.join("\n"), s)
     if not res.ok: raise newException(ValueError,
-        "Failed to parse proto file at index " & $res.matchMax)
+        "Failed to parse proto file at index " & $res.matchMax & " : " & modifiedProtoContent.join("\n")[max(0, res.matchMax-1) ..< min(res.matchMax + 100, modifiedProtoContent.join("\n").len)])
     result = s.root
   else:
     let res = parser.match(content, s)
     if not res.ok: raise newException(ValueError,
-        "Failed to parse proto file at index " & $res.matchMax)
+        "Failed to parse proto file at index " & $res.matchMax & " : " & content[max(0, res.matchMax-1) ..< min(res.matchMax + 100, content.len)])
     result = s.root

@@ -1,6 +1,8 @@
 syntax = "proto3";
 package enums;
 
+import "enum_to_import.proto";
+
 enum Color {
   RED = 0;
   GREEN = 1;

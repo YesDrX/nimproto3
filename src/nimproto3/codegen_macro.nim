@@ -49,10 +49,18 @@ macro importProto3*(file: static[string], searchDirs: static[seq[
 proc proto3Impl(proto_code: NimNode, searchDirs: seq[
         string], extraImportPackages: seq[string], replaceCode: seq[tuple[oldStr : string, newStr : string]]): NimNode {.compileTime.} =
     var success = false
+    
     when defined(windows):
-        let filename = currentSourcePath().parentDir() & "\\tmp.proto"
+        let filename = currentSourcePath().parentDir() & "\\tmp_proto3Impl.proto"
+        let cmd = "powershell.exe -NoProfile -Command Remove-Item -Force \"" & filename & "\""
+        echo "[nimproto3] Running command: " & cmd
+        echo staticExec(cmd)
     else:
-        let filename = "/tmp/tmp.proto"
+        let filename = "/tmp/tmp_proto3Impl.proto"
+        let cmd = "rm \"" & filename & "\""
+        echo "[nimproto3] Running command: " & cmd
+        echo staticExec(cmd)
+
     writeFile(filename, proto_code.strVal)
 
     try:

@@ -1,12 +1,19 @@
 syntax = "proto3";
 package nested;
 
+
+
 message Outer {
   message Middle {
     message Inner {
       int64 value = 1;
     }
+    enum InnerEnum {
+      INNER_VALUE = 0;
+      INNER_OTHER_VALUE = 1;
+    }
     Inner inner = 1;
+    InnerEnum inner_enum = 2;
   }
-  Middle middle = 1;
+  Middle middle = 3;
 }

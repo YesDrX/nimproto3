@@ -263,7 +263,7 @@ proc decodeHeaders*(ctx: HpackContext, data: seq[byte]): seq[HpackHeader] =
       i += c
       res.add((name, val))
     elif (b and 0x20) != 0:
-      let (size, consumed) = decodeInteger(data, i, 5)
+      let (_, consumed) = decodeInteger(data, i, 5)
       i += consumed
     else:
       let (nameIdx, consumed) = decodeInteger(data, i, 4)

@@ -1,3 +1,4 @@
+# ast.nim
 
 import strutils, tables
 
@@ -7,7 +8,7 @@ type
     nkProto, nkSyntax, nkEdition, nkPackage, nkImport, nkOption,
     nkMessage, nkEnum, nkService, nkField, nkMapField, nkOneof,
     nkEnumField, nkRpc, nkStream, nkComment, nkReserved, nkExtensions,
-    nkGroup
+    nkGroup, nkExtend # Added nkExtend
 
   ProtoNode* {.acyclic.} = ref object
     kind*: ProtoNodeKind
