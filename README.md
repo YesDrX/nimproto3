@@ -143,7 +143,7 @@ proc handleListUsers(stream: GrpcStream) {.async.} =
 
 when isMainModule:
   # Enable server-side compression preference (e.g., Gzip)
-  let server = newGrpcServer(50051, CompressionGzip)
+  let server = newGrpcServer(50051, CompressionGzip) # if -d:ssl, you can specify certFile and keyFile
 
   # Register routes
   server.registerHandler("/UserService/GetUser", handleGetUser) # "/package_name.UserService/GetUser" if package_name is defined in the .proto file
@@ -166,7 +166,7 @@ when isMainModule:
     echo "================================================================================"
 
     # Example 1: Identity + Custom Metadata
-    let client = newGrpcClient("localhost", 50051, CompressionIdentity)
+    let client = newGrpcClient("localhost", 50051, CompressionIdentity) #if -d:ssl, you can disable ssl certificate verification by setting sslVerify = false
     await client.connect()
     await sleepAsync(200) # Wait for settings exchange
 
@@ -191,6 +191,8 @@ when isMainModule:
 ```bash
 nim r -d:showGeneratedProto3Code ./tests/grpc_example/server.nim # -d:showGeneratedProto3Code will show generated code during compile time; # -d:traceGrpc will print out the gRPC network traffic
 nim r -d:showGeneratedProto3Code ./tests/grpc_example/client.nim
+
+# use -d:ssl to enable TLS support on server/client
 ```
 - Other examples
   - [server.nim](tests/grpc/server.nim)
@@ -202,6 +204,12 @@ nim r -d:showGeneratedProto3Code ./tests/grpc_example/client.nim
     - [client2.py](tests/grpc/client2.py)
     - [client3.py](tests/grpc/client3.py)
   - to test against grpcbin.bin server:
+    - [test9.nim](tests/test9.nim) # grpcbin DummyClientStream is buggy
+  - TLS tests:
+    - [server_tls.py](tests/grpc/server_tls.py)
+    - [server_tls.nim](tests/grpc/server_tls.nim)
+    - [client_tls.nim](tests/grpc/client_tls.nim)
+    - [client_tls.py](tests/grpc/client_tls.py)
     - [test8.nim](tests/test8.nim) # grpcbin DummyClientStream is buggy
 
 ### 2. Using the `proto3` Macro (Inline Schemas)
