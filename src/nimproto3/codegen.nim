@@ -1664,13 +1664,15 @@ proc generateTypes*(ast: ProtoNode): string =
       result &= generateService(child, packageName)
 
 proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[],
-    extraImportPackages: seq[string] = @[]): string =
+    extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[oldStr : string, newStr : string]] = @[]): string =
   let ast = parseProto(protoString, searchDirs,
       extraImportPackages = extraImportPackages)
-  return generateTypes(ast)
+  result = generateTypes(ast)
+  for (oldStr, newStr) in replaceCode:
+    result = result.replace(oldStr, newStr)
 
 proc genCodeFromProtoFile*(filePath: string, searchDirs: seq[string] = @[],
-    extraImportPackages: seq[string] = @[]): string =
+    extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[oldStr : string, newStr : string]] = @[]): string =
   if not fileExists(filePath):
     raise newException(ValueError, "File does not exist: " & filePath)
 
@@ -1678,4 +1680,6 @@ proc genCodeFromProtoFile*(filePath: string, searchDirs: seq[string] = @[],
   fullSearchDirs.add(parentDir(filePath))
   let ast = parseProto(readFile(filePath), fullSearchDirs,
       extraImportPackages = extraImportPackages)
-  return generateTypes(ast)
+  result = generateTypes(ast)
+  for (oldStr, newStr) in replaceCode:
+    result = result.replace(oldStr, newStr)

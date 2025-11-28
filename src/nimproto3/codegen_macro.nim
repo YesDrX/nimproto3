@@ -4,7 +4,7 @@ import ./[wire_format]
 export wire_format, json, tables, strutils, strformat
 
 proc importProtoImpl(file: string, searchDirs: seq[string],
-        extraImportPackages: seq[string]): NimNode =
+        extraImportPackages: seq[string], replaceCode: seq[tuple[oldStr : string, newStr : string]] = @[]): NimNode =
     # var cmdPath = staticExec("which protonim")
     # if cmdPath.len == 0:
     when defined(windows):
@@ -14,11 +14,13 @@ proc importProtoImpl(file: string, searchDirs: seq[string],
 
     var cmdPath = "nim r " & protonimPath
     var cmd = cmdPath & " -i " & file
-    if searchDirs.len > 0:
-        for dirname in searchDirs:
-            cmd &= " -s " & dirname
-    when defined(showGeneratedProto3Code):
-        echo "Running command to generate nim code: " & cmd
+    for dirname in searchDirs:
+        cmd &= " -s " & dirname
+    for extraImport in extraImportPackages:
+        cmd &= " -p " & extraImport
+    for replaceRule in replaceCode:
+        cmd &= " -r " & replaceRule.oldStr & ":" & replaceRule.newStr
+    echo "Running command to generate nim code: " & cmd
     var generatedCode = staticExec(cmd)
     if not generatedCode.contains("# Generated from protobuf"):
         raise newException(ValueError, "Failed to parse proto file: " & file &
