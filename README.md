@@ -385,12 +385,48 @@ The `importProto3` macro automatically resolves and processes imported files.
 ### Oneofs
 
 ```protobuf
-message Profile {
-  oneof identifier {
-    string username = 1;
-    int32 user_id = 2;
+message RpcCall {
+  string function_name = 1;
+  repeated Argument args = 2;
+  int32 call_id = 3;
+}
+
+message Argument {
+  oneof value {
+    int32 int_val = 1;
+    bool bool_val = 2;
+    string string_val = 3;
+    bytes data_val = 4;
   }
 }
+```
+Onefs are generated as object variant (need -d:nimOldCaseObjects for runtime behavior):
+```nim
+type
+  RpcCall* = object
+    function_name*: string
+    args*: seq[Argument]
+    call_id*: int32
+
+
+  ArgumentValueKind* {.size: 4.} = enum
+    rkNone # nothing set
+    rkInt_val
+    rkBool_val
+    rkString_val
+    rkData_val
+
+  Argument* = object
+    case valueKind*: ArgumentValueKind
+    of rkNone: discard
+    of rkInt_val:
+      int_val*: int32
+    of rkBool_val:
+      bool_val*: bool
+    of rkString_val:
+      string_val*: string
+    of rkData_val:
+      data_val*: seq[byte]
 ```
 
 ### Services
@@ -539,6 +575,12 @@ proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
       type: ".pb.Proto1Features"
     }
   ];
+```
+
+3. **Need -d:nimOldCaseObjects for oneof fields:**:
+- When there is oneof fields in the proto file, you need to add -d:nimOldCaseObjects to the Nim compiler flags, otherwise you will get a compile error: 
+```nim
+Error: unhandled exception: assignment to discriminant changes object branch; compile with -d:nimOldCaseObjects for a transition period [FieldDefect]
 ```
 
 ## Development

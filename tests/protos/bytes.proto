@@ -1,0 +1,17 @@
+syntax = "proto3";
+package oneofs;
+
+message RpcCall {
+  string function_name = 1;
+  repeated Argument args = 2;
+  int32 call_id = 3;
+}
+
+message Argument {
+  oneof value {
+    int32 int_val = 1;
+    bool bool_val = 2;
+    string string_val = 3;
+    bytes data_val = 4;
+  }
+}

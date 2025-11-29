@@ -38,10 +38,10 @@ proc decodeVarint*(data: openArray[byte], pos: var int): uint64 =
       return
     shift += 7
     if shift >= 64:
-       raise newException(ValueError, "Varint too long")
+      raise newException(ValueError, "Varint too long")
   # If we run out of data before finding the end of the varint
   if shift > 0 and pos >= data.len:
-      raise newException(ValueError, "Truncated varint")
+    raise newException(ValueError, "Truncated varint")
 
 proc decodeZigZag*(value: uint64): int64 =
   ## ZigZag decoding for signed integers
@@ -60,12 +60,13 @@ proc decodeFieldKey*(data: openArray[byte], pos: var int): tuple[
   ## Decode field key into field number and wire type
   let key = decodeVarint(data, pos)
   let wireVal = key and 0x7
-  
+
   # FIX: Prevent RangeDefect by checking if the wire type is valid for the Enum
   # Valid Protobuf wire types are 0, 1, 2, 3, 4, 5.
   if wireVal > 5:
-    raise newException(ValueError, "Corrupted protobuf stream: Invalid WireType " & $wireVal & " at offset " & $pos)
-    
+    raise newException(ValueError, "Corrupted protobuf stream: Invalid WireType " &
+        $wireVal & " at offset " & $pos)
+
   result.wireType = WireType(wireVal)
   result.fieldNumber = int(key shr 3)
 
@@ -78,8 +79,8 @@ proc decodeLengthDelimited*(data: openArray[byte], pos: var int): seq[byte] =
   ## Decode length-delimited data
   let length = int(decodeVarint(data, pos))
   if pos + length > data.len:
-      raise newException(ValueError, "Unexpected end of data reading length delimited field")
-  
+    raise newException(ValueError, "Unexpected end of data reading length delimited field")
+
   result = newSeq[byte](length)
   if length > 0:
     copyMem(addr result[0], unsafeAddr data[pos], length)
@@ -89,34 +90,39 @@ proc decodeLengthDelimited*(data: openArray[byte], pos: var int): seq[byte] =
 # ENCODING HELPERS
 # -----------------------------------------------------------------------------
 
-proc encodeInt32*(value: int32): seq[byte] = 
+proc encodeInt32*(value: int32): seq[byte] =
   if value < 0:
     encodeVarint(cast[uint64](int64(value)))
   else:
     encodeVarint(uint64(value))
 
-proc encodeInt64*(value: int64): seq[byte] = 
+proc encodeInt64*(value: int64): seq[byte] =
   encodeVarint(cast[uint64](value))
 
-proc encodeUInt32*(value: uint32): seq[byte] = 
+proc encodeUInt32*(value: uint32): seq[byte] =
   encodeVarint(uint64(value))
 
-proc encodeUInt64*(value: uint64): seq[byte] = 
+proc encodeUInt64*(value: uint64): seq[byte] =
   encodeVarint(value)
 
-proc encodeSInt32*(value: int32): seq[byte] = 
+proc encodeSInt32*(value: int32): seq[byte] =
   encodeVarint(encodeZigZag(value))
 
-proc encodeSInt64*(value: int64): seq[byte] = 
+proc encodeSInt64*(value: int64): seq[byte] =
   encodeVarint(encodeZigZag(value))
 
-proc encodeBool*(value: bool): seq[byte] = 
+proc encodeBool*(value: bool): seq[byte] =
   encodeVarint(if value: 1'u64 else: 0'u64)
 
 proc encodeString*(value: string): seq[byte] =
   result = encodeVarint(uint64(value.len))
   for c in value:
     result.add(byte(c))
+
+proc encodeString*(value: openArray[byte]): seq[byte] =
+  result = encodeVarint(uint64(value.len))
+  if value.len > 0:
+    result.add(value)
 
 proc encodeFloat32*(value: float32): seq[byte] =
   result = newSeq[byte](4)
@@ -157,7 +163,7 @@ proc decodeBool*(data: openArray[byte], pos: var int): bool =
 proc decodeString*(data: openArray[byte], pos: var int): string =
   let length = int(decodeVarint(data, pos))
   if pos + length > data.len:
-      raise newException(ValueError, "Unexpected end of data reading string")
+    raise newException(ValueError, "Unexpected end of data reading string")
   result = newString(length)
   if length > 0:
     copyMem(addr result[0], unsafeAddr data[pos], length)

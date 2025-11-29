@@ -4,7 +4,8 @@ import ./[wire_format]
 export wire_format, json, tables, strutils, strformat
 
 proc importProtoImpl(file: string, searchDirs: seq[string],
-        extraImportPackages: seq[string], replaceCode: seq[tuple[oldStr : string, newStr : string]] = @[]): NimNode =
+        extraImportPackages: seq[string], replaceCode: seq[tuple[oldStr: string,
+                newStr: string]] = @[]): NimNode =
     # var cmdPath = staticExec("which protonim")
     # if cmdPath.len == 0:
     when defined(windows):
@@ -43,23 +44,19 @@ macro importProto3*(file: static[string], searchDirs: static[seq[
     result = importProtoImpl(file, searchDirs, extraImportPackages, @[])
 
 macro importProto3*(file: static[string], searchDirs: static[seq[
-        string]], extraImportPackages: static[seq[string]], replaceCode: static[seq[tuple[oldStr : string, newStr : string]]]): untyped =
+        string]], extraImportPackages: static[seq[string]], replaceCode: static[
+                seq[tuple[oldStr: string, newStr: string]]]): untyped =
     result = importProtoImpl(file, searchDirs, extraImportPackages, replaceCode)
 
 proc proto3Impl(proto_code: NimNode, searchDirs: seq[
-        string], extraImportPackages: seq[string], replaceCode: seq[tuple[oldStr : string, newStr : string]]): NimNode {.compileTime.} =
+        string], extraImportPackages: seq[string], replaceCode: seq[tuple[
+                oldStr: string, newStr: string]]): NimNode {.compileTime.} =
     var success = false
-    
+
     when defined(windows):
         let filename = currentSourcePath().parentDir() & "\\tmp_proto3Impl.proto"
-        let cmd = "powershell.exe -NoProfile -Command Remove-Item -Force \"" & filename & "\""
-        echo "[nimproto3] Running command: " & cmd
-        echo staticExec(cmd)
     else:
         let filename = "/tmp/tmp_proto3Impl.proto"
-        let cmd = "rm \"" & filename & "\""
-        echo "[nimproto3] Running command: " & cmd
-        echo staticExec(cmd)
 
     writeFile(filename, proto_code.strVal)
 
@@ -94,7 +91,8 @@ macro proto3*(proto_code: untyped, searchDirs: static[seq[
     result = proto3Impl(proto_code, searchDirs, extraImportPackages, @[])
 
 macro proto3*(proto_code: untyped, searchDirs: static[seq[
-        string]], extraImportPackages: static[seq[string]], replaceCode: static[seq[tuple[oldStr : string, newStr : string]]]): untyped =
+        string]], extraImportPackages: static[seq[string]], replaceCode: static[
+                seq[tuple[oldStr: string, newStr: string]]]): untyped =
     result = proto3Impl(proto_code, searchDirs, extraImportPackages, replaceCode)
 
 # importProto3 "../../tests/protos/maps.proto", @["../../tests/protos"]
