@@ -1,0 +1,84 @@
+nimTitle	grpc	nimproto3/grpc.html	module src/nimproto3/grpc		0
+nim	DATA	nimproto3/grpc.html#DATA	FrameType.DATA		38
+nim	HEADERS	nimproto3/grpc.html#HEADERS	FrameType.HEADERS		38
+nim	PRIORITY	nimproto3/grpc.html#PRIORITY	FrameType.PRIORITY		38
+nim	RST_STREAM	nimproto3/grpc.html#RST_STREAM	FrameType.RST_STREAM		38
+nim	SETTINGS	nimproto3/grpc.html#SETTINGS	FrameType.SETTINGS		38
+nim	PUSH_PROMISE	nimproto3/grpc.html#PUSH_PROMISE	FrameType.PUSH_PROMISE		38
+nim	PING	nimproto3/grpc.html#PING	FrameType.PING		38
+nim	GOAWAY	nimproto3/grpc.html#GOAWAY	FrameType.GOAWAY		38
+nim	WINDOW_UPDATE	nimproto3/grpc.html#WINDOW_UPDATE	FrameType.WINDOW_UPDATE		38
+nim	CONTINUATION	nimproto3/grpc.html#CONTINUATION	FrameType.CONTINUATION		38
+nim	FrameType	nimproto3/grpc.html#FrameType	enum FrameType		38
+nim	ACK_OR_END_STREAM	nimproto3/grpc.html#ACK_OR_END_STREAM	FrameFlags.ACK_OR_END_STREAM		50
+nim	END_HEADERS	nimproto3/grpc.html#END_HEADERS	FrameFlags.END_HEADERS		50
+nim	PADDED	nimproto3/grpc.html#PADDED	FrameFlags.PADDED		50
+nim	FrameFlags	nimproto3/grpc.html#FrameFlags	enum FrameFlags		50
+nim	OK	nimproto3/grpc.html#OK	StatusCode.OK		55
+nim	CANCELLED	nimproto3/grpc.html#CANCELLED	StatusCode.CANCELLED		55
+nim	UNKNOWN	nimproto3/grpc.html#UNKNOWN	StatusCode.UNKNOWN		55
+nim	INVALID_ARGUMENT	nimproto3/grpc.html#INVALID_ARGUMENT	StatusCode.INVALID_ARGUMENT		55
+nim	DEADLINE_EXCEEDED	nimproto3/grpc.html#DEADLINE_EXCEEDED	StatusCode.DEADLINE_EXCEEDED		55
+nim	NOT_FOUND	nimproto3/grpc.html#NOT_FOUND	StatusCode.NOT_FOUND		55
+nim	ALREADY_EXISTS	nimproto3/grpc.html#ALREADY_EXISTS	StatusCode.ALREADY_EXISTS		55
+nim	PERMISSION_DENIED	nimproto3/grpc.html#PERMISSION_DENIED	StatusCode.PERMISSION_DENIED		55
+nim	RESOURCE_EXHAUSTED	nimproto3/grpc.html#RESOURCE_EXHAUSTED	StatusCode.RESOURCE_EXHAUSTED		55
+nim	FAILED_PRECONDITION	nimproto3/grpc.html#FAILED_PRECONDITION	StatusCode.FAILED_PRECONDITION		55
+nim	ABORTED	nimproto3/grpc.html#ABORTED	StatusCode.ABORTED		55
+nim	OUT_OF_RANGE	nimproto3/grpc.html#OUT_OF_RANGE	StatusCode.OUT_OF_RANGE		55
+nim	UNIMPLEMENTED	nimproto3/grpc.html#UNIMPLEMENTED	StatusCode.UNIMPLEMENTED		55
+nim	INTERNAL	nimproto3/grpc.html#INTERNAL	StatusCode.INTERNAL		55
+nim	UNAVAILABLE	nimproto3/grpc.html#UNAVAILABLE	StatusCode.UNAVAILABLE		55
+nim	DATA_LOSS	nimproto3/grpc.html#DATA_LOSS	StatusCode.DATA_LOSS		55
+nim	UNAUTHENTICATED	nimproto3/grpc.html#UNAUTHENTICATED	StatusCode.UNAUTHENTICATED		55
+nim	StatusCode	nimproto3/grpc.html#StatusCode	enum StatusCode		55
+nim	GrpcError	nimproto3/grpc.html#GrpcError	object GrpcError		74
+nim	CompressionIdentity	nimproto3/grpc.html#CompressionIdentity	GrpcCompression.CompressionIdentity		77
+nim	CompressionGzip	nimproto3/grpc.html#CompressionGzip	GrpcCompression.CompressionGzip		77
+nim	CompressionDeflate	nimproto3/grpc.html#CompressionDeflate	GrpcCompression.CompressionDeflate		77
+nim	CompressionSnappy	nimproto3/grpc.html#CompressionSnappy	GrpcCompression.CompressionSnappy		77
+nim	GrpcCompression	nimproto3/grpc.html#GrpcCompression	enum GrpcCompression		77
+nim	AsyncQueue	nimproto3/grpc.html#AsyncQueue	type AsyncQueue		88
+nim	newAsyncQueue	nimproto3/grpc.html#newAsyncQueue	proc newAsyncQueue[T](): AsyncQueue[T]		92
+nim	put	nimproto3/grpc.html#put,AsyncQueue[T],T	proc put[T](q: AsyncQueue[T]; item: T)		97
+nim	get	nimproto3/grpc.html#get,AsyncQueue[T]	proc get[T](q: AsyncQueue[T]): Future[T]		104
+nim	HpackHeader	nimproto3/grpc.html#HpackHeader	tuple HpackHeader		148
+nim	HpackContext	nimproto3/grpc.html#HpackContext	type HpackContext		176
+nim	newHpack	nimproto3/grpc.html#newHpack	proc newHpack(): HpackContext		179
+nim	encodeHeaders	nimproto3/grpc.html#encodeHeaders,HpackContext,openArray[HpackHeader]	proc encodeHeaders(ctx: HpackContext; headers: openArray[HpackHeader]): seq[byte]		198
+nim	decodeHeaders	nimproto3/grpc.html#decodeHeaders,HpackContext,seq[byte]	proc decodeHeaders(ctx: HpackContext; data: seq[byte]): seq[HpackHeader]		241
+nim	Http2Frame	nimproto3/grpc.html#Http2Frame	object Http2Frame		289
+nim	packFrame	nimproto3/grpc.html#packFrame,FrameType,uint8,uint32,openArray[byte]	proc packFrame(ft: FrameType; flags: uint8; streamId: uint32;\n          payload: openArray[byte]): seq[byte]		296
+nim	parseFrameHeader	nimproto3/grpc.html#parseFrameHeader,seq[byte]	proc parseFrameHeader(data: seq[byte]): Http2Frame		312
+nim	SE_HEADERS	nimproto3/grpc.html#SE_HEADERS	StreamEventKind.SE_HEADERS		338
+nim	SE_DATA	nimproto3/grpc.html#SE_DATA	StreamEventKind.SE_DATA		338
+nim	SE_TRAILERS	nimproto3/grpc.html#SE_TRAILERS	StreamEventKind.SE_TRAILERS		338
+nim	SE_RST	nimproto3/grpc.html#SE_RST	StreamEventKind.SE_RST		338
+nim	StreamEventKind	nimproto3/grpc.html#StreamEventKind	enum StreamEventKind		338
+nim	StreamEvent	nimproto3/grpc.html#StreamEvent	object StreamEvent		341
+nim	Http2Stream	nimproto3/grpc.html#Http2Stream	type Http2Stream		347
+nim	Http2Connection	nimproto3/grpc.html#Http2Connection	type Http2Connection		357
+nim	newHttp2Connection	nimproto3/grpc.html#newHttp2Connection,string,int,bool	proc newHttp2Connection(host: string; port: int; isServer: bool = false): Http2Connection		373
+nim	sendFrame	nimproto3/grpc.html#sendFrame,Http2Connection,seq[byte]	proc sendFrame(conn: Http2Connection; frame: seq[byte]): owned(Future[void])		388
+nim	createStream	nimproto3/grpc.html#createStream,Http2Connection,uint32	proc createStream(conn: Http2Connection; id: uint32 = 0): Http2Stream		399
+nim	processFrame	nimproto3/grpc.html#processFrame,Http2Connection,Http2Frame,seq[byte]	proc processFrame(conn: Http2Connection; frame: Http2Frame; payload: seq[byte])		413
+nim	readLoop	nimproto3/grpc.html#readLoop,Http2Connection	proc readLoop(conn: Http2Connection): owned(Future[void])		467
+nim	connect	nimproto3/grpc.html#connect,Http2Connection	proc connect(conn: Http2Connection): owned(Future[void])		487
+nim	acceptHttp2	nimproto3/grpc.html#acceptHttp2,Http2Connection	proc acceptHttp2(conn: Http2Connection): owned(Future[void])		519
+nim	GrpcStream	nimproto3/grpc.html#GrpcStream	type GrpcStream		536
+nim	sendMsg	nimproto3/grpc.html#sendMsg,GrpcStream,seq[byte]	proc sendMsg(stream: GrpcStream; data: seq[byte]): owned(Future[void])		559
+nim	closeSend	nimproto3/grpc.html#closeSend,GrpcStream	proc closeSend(stream: GrpcStream): owned(Future[void])		580
+nim	recvMsg	nimproto3/grpc.html#recvMsg,GrpcStream	proc recvMsg(stream: GrpcStream): Future[Option[seq[byte]]]		585
+nim	GrpcChannel	nimproto3/grpc.html#GrpcChannel	type GrpcChannel		645
+nim	newGrpcChannel	nimproto3/grpc.html#newGrpcChannel,string,int,GrpcCompression,bool,string	proc newGrpcChannel(host: string; port: int;\n               compression: GrpcCompression = CompressionIdentity;\n               sslVerify: bool = true; certFile: string = ""): GrpcChannel		650
+nim	newGrpcClient	nimproto3/grpc.html#newGrpcClient,string,int,GrpcCompression,bool,string	proc newGrpcClient(host: string; port: int;\n              compression: GrpcCompression = CompressionIdentity;\n              sslVerify: bool = true; certFile: string = ""): GrpcChannel		660
+nim	connect	nimproto3/grpc.html#connect,GrpcChannel	proc connect(chan: GrpcChannel): owned(Future[void])		679
+nim	close	nimproto3/grpc.html#close,GrpcChannel	proc close(chan: GrpcChannel)		690
+nim	startRpc	nimproto3/grpc.html#startRpc,GrpcChannel,string,seq[HpackHeader]	proc startRpc(chan: GrpcChannel; methodPath: string;\n         metadata: seq[HpackHeader] = @[]): Future[GrpcStream]		702
+nim	grpcInvoke	nimproto3/grpc.html#grpcInvoke,GrpcChannel,string,seq[seq[byte]],seq[HpackHeader]	proc grpcInvoke(chan: GrpcChannel; methodPath: string; requests: seq[seq[byte]];\n           metadata: seq[HpackHeader] = @[]): Future[seq[seq[byte]]]		736
+nim	RpcHandler	nimproto3/grpc.html#RpcHandler	type RpcHandler		758
+nim	GrpcServer	nimproto3/grpc.html#GrpcServer	type GrpcServer		760
+nim	newGrpcServer	nimproto3/grpc.html#newGrpcServer,int,GrpcCompression,string,string	proc newGrpcServer(port: int;\n              preferredCompression: GrpcCompression = CompressionIdentity;\n              certFile: string = ""; keyFile: string = ""): GrpcServer		768
+nim	registerHandler	nimproto3/grpc.html#registerHandler,GrpcServer,string,RpcHandler	proc registerHandler(server: GrpcServer; path: string; handler: RpcHandler)		791
+nim	serve	nimproto3/grpc.html#serve,GrpcServer,string	proc serve(server: GrpcServer; ip: string = "0.0.0.0"): owned(Future[void])		897
+nimgrp	connect	nimproto3/grpc.html#connect-procs-all	proc		487

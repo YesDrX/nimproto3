@@ -1,0 +1,3 @@
+nimTitle	parser	nimproto3/parser.html	module src/nimproto3/parser		0
+nim	parseProto	nimproto3/parser.html#parseProto,string,seq[string],ref.Table[string,ProtoNode],seq[string]	proc parseProto(content: string; searchDirs: seq[string] = @[];\n           cache: ref Table[string, ProtoNode] = nil;\n           extraImportPackages: seq[string] = @[]): ProtoNode		45
+nim	parser	nimproto3/parser.html#parser	let parser		49

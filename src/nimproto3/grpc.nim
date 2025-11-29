@@ -661,12 +661,39 @@ proc newGrpcClient*(host: string, port: int,
     compression: GrpcCompression = CompressionIdentity,
     sslVerify: bool = true,
     certFile: string = ""): GrpcChannel =
+  ## Create a new gRPC client channel.
+  ##
+  ## Arguments:
+  ## - `host`: The server hostname or IP address.
+  ## - `port`: The server port.
+  ## - `compression`: The compression algorithm to use for sending messages.
+  ## - `sslVerify`: Whether to verify the server's SSL certificate (default: true).
+  ## - `certFile`: Path to a CA certificate file for verification (optional).
+  ##
+  ## Example:
+  ## ```nim
+  ## let client = newGrpcClient("localhost", 50051)
+  ## ```
   newGrpcChannel(host, port, compression, sslVerify, certFile)
 
 proc connect*(chan: GrpcChannel) {.async.} =
+  ## Connect to the gRPC server.
+  ##
+  ## This procedure establishes the TCP/TLS connection and performs the HTTP/2 handshake.
+  ##
+  ## Example:
+  ## ```nim
+  ## await client.connect()
+  ## ```
   await chan.conn.connect()
 
 proc close*(chan: GrpcChannel) =
+  ## Close the gRPC channel and the underlying connection.
+  ##
+  ## Example:
+  ## ```nim
+  ## client.close()
+  ## ```
   chan.conn.connected = false
   chan.conn.socket.close()
 
@@ -740,6 +767,18 @@ type GrpcServer* = ref object
 
 proc newGrpcServer*(port: int, preferredCompression: GrpcCompression = CompressionIdentity,
                     certFile: string = "", keyFile: string = ""): GrpcServer =
+  ## Create a new gRPC server.
+  ##
+  ## Arguments:
+  ## - `port`: The port to listen on.
+  ## - `preferredCompression`: The preferred compression algorithm for responses.
+  ## - `certFile`: Path to the SSL certificate file (PEM format).
+  ## - `keyFile`: Path to the SSL private key file (PEM format).
+  ##
+  ## Example:
+  ## ```nim
+  ## let server = newGrpcServer(50051)
+  ## ```
   new(result)
   result.socket = newAsyncSocket()
   result.socket.setSockOpt(OptReuseAddr, true)
@@ -750,6 +789,17 @@ proc newGrpcServer*(port: int, preferredCompression: GrpcCompression = Compressi
   result.keyFile = keyFile
 
 proc registerHandler*(server: GrpcServer, path: string, handler: RpcHandler) =
+  ## Register a handler for a specific gRPC method path.
+  ##
+  ## Arguments:
+  ## - `server`: The gRPC server instance.
+  ## - `path`: The full method path (e.g., "/package.Service/Method").
+  ## - `handler`: The async procedure to handle the request.
+  ##
+  ## Example:
+  ## ```nim
+  ## server.registerHandler("/myservice.Greeter/SayHello", sayHelloHandler)
+  ## ```
   server.handlers[path] = handler
 
 proc handleServerStream(server: GrpcServer, httpStream: Http2Stream) {.async.} =
@@ -845,6 +895,16 @@ proc processClient(server: GrpcServer, socket: AsyncSocket) {.async.} =
     echo "[Server] Connection error: ", getCurrentExceptionMsg()
 
 proc serve*(server: GrpcServer, ip: string = "0.0.0.0") {.async.} =
+  ## Start the gRPC server and listen for incoming connections.
+  ##
+  ## Arguments:
+  ## - `server`: The gRPC server instance.
+  ## - `ip`: The IP address to bind to (default: "0.0.0.0").
+  ##
+  ## Example:
+  ## ```nim
+  ## await server.serve()
+  ## ```
   server.socket.bindAddr(server.port.Port, address = ip)
   server.socket.listen()
   echo "[Server] Listening on ", ip, ":", server.port

@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.6.4"
+version       = "0.6.5"
 author        = "Yes DrX"
 description   = "Nim implementation of protobuf3 based on npeg."
 license       = "MIT"

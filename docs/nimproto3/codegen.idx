@@ -1,0 +1,9 @@
+nimTitle	codegen	nimproto3/codegen.html	module src/nimproto3/codegen		0
+nim	protoTypeToNim	nimproto3/codegen.html#protoTypeToNim,string,bool,string	proc protoTypeToNim(typeName: string; isRepeated: bool = false;\n               packagePrefix: string = ""): string		31
+nim	generateEnum	nimproto3/codegen.html#generateEnum,ProtoNode,string	proc generateEnum(node: ProtoNode; prefix: string = ""): string		78
+nim	generateMessage	nimproto3/codegen.html#generateMessage,ProtoNode,string,seq[string],string	proc generateMessage(node: ProtoNode; prefix: string = "";\n                nestedTypes: var seq[string]; packagePrefix: string = ""): string		97
+nim	generateEnumSerializationProcs	nimproto3/codegen.html#generateEnumSerializationProcs,string	proc generateEnumSerializationProcs(enumName: string): string		1390
+nim	generateService	nimproto3/codegen.html#generateService,ProtoNode,string	proc generateService(node: ProtoNode; packageName: string = ""): string		1447
+nim	generateTypes	nimproto3/codegen.html#generateTypes,ProtoNode	proc generateTypes(ast: ProtoNode): string		1632
+nim	genCodeFromProtoString	nimproto3/codegen.html#genCodeFromProtoString,string,seq[string],seq[string],seq[tuple[string,string]]	proc genCodeFromProtoString(protoString: string; searchDirs: seq[string] = @[];\n                       extraImportPackages: seq[string] = @[]; replaceCode: seq[\n    tuple[oldStr: string, newStr: string]] = @[]): string		1815
+nim	genCodeFromProtoFile	nimproto3/codegen.html#genCodeFromProtoFile,string,seq[string],seq[string],seq[tuple[string,string]]	proc genCodeFromProtoFile(filePath: string; searchDirs: seq[string] = @[];\n                     extraImportPackages: seq[string] = @[]; replaceCode: seq[\n    tuple[oldStr: string, newStr: string]] = @[]): string		1834

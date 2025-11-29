@@ -1,0 +1,11 @@
+nimTitle	codegen_macro	nimproto3/codegen_macro.html	module src/nimproto3/codegen_macro		0
+nim	importProto3	nimproto3/codegen_macro.html#importProto3.m,static[string]	macro importProto3(file: static[string]): untyped		35
+nim	importProto3	nimproto3/codegen_macro.html#importProto3.m,static[string],static[seq[string]]	macro importProto3(file: static[string]; searchDirs: static[seq[string]]): untyped		47
+nim	importProto3	nimproto3/codegen_macro.html#importProto3.m,static[string],static[seq[string]],static[seq[string]]	macro importProto3(file: static[string]; searchDirs: static[seq[string]];\n             extraImportPackages: static[seq[string]]): untyped		61
+nim	importProto3	nimproto3/codegen_macro.html#importProto3.m,static[string],static[seq[string]],static[seq[string]],static[seq[tuple[string,string]]]	macro importProto3(file: static[string]; searchDirs: static[seq[string]];\n             extraImportPackages: static[seq[string]];\n             replaceCode: static[seq[tuple[oldStr: string, newStr: string]]]): untyped		76
+nim	proto3	nimproto3/codegen_macro.html#proto3.m,untyped	macro proto3(proto_code: untyped): untyped		124
+nim	proto3	nimproto3/codegen_macro.html#proto3.m,untyped,static[seq[string]]	macro proto3(proto_code: untyped; searchDirs: static[seq[string]]): untyped		139
+nim	proto3	nimproto3/codegen_macro.html#proto3.m,untyped,static[seq[string]],static[seq[string]]	macro proto3(proto_code: untyped; searchDirs: static[seq[string]];\n       extraImportPackages: static[seq[string]]): untyped		148
+nim	proto3	nimproto3/codegen_macro.html#proto3.m,untyped,static[seq[string]],static[seq[string]],static[seq[tuple[string,string]]]	macro proto3(proto_code: untyped; searchDirs: static[seq[string]];\n       extraImportPackages: static[seq[string]];\n       replaceCode: static[seq[tuple[oldStr: string, newStr: string]]]): untyped		158
+nimgrp	proto3	nimproto3/codegen_macro.html#proto3-macros-all	macro		124
+nimgrp	importproto3	nimproto3/codegen_macro.html#importProto3-macros-all	macro		35

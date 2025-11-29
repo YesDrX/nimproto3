@@ -1,0 +1,30 @@
+nimTitle	ast	nimproto3/ast.html	module src/nimproto3/ast		0
+nim	nkProto	nimproto3/ast.html#nkProto	ProtoNodeKind.nkProto		7
+nim	nkSyntax	nimproto3/ast.html#nkSyntax	ProtoNodeKind.nkSyntax		7
+nim	nkEdition	nimproto3/ast.html#nkEdition	ProtoNodeKind.nkEdition		7
+nim	nkPackage	nimproto3/ast.html#nkPackage	ProtoNodeKind.nkPackage		7
+nim	nkImport	nimproto3/ast.html#nkImport	ProtoNodeKind.nkImport		7
+nim	nkOption	nimproto3/ast.html#nkOption	ProtoNodeKind.nkOption		7
+nim	nkMessage	nimproto3/ast.html#nkMessage	ProtoNodeKind.nkMessage		7
+nim	nkEnum	nimproto3/ast.html#nkEnum	ProtoNodeKind.nkEnum		7
+nim	nkService	nimproto3/ast.html#nkService	ProtoNodeKind.nkService		7
+nim	nkField	nimproto3/ast.html#nkField	ProtoNodeKind.nkField		7
+nim	nkMapField	nimproto3/ast.html#nkMapField	ProtoNodeKind.nkMapField		7
+nim	nkOneof	nimproto3/ast.html#nkOneof	ProtoNodeKind.nkOneof		7
+nim	nkEnumField	nimproto3/ast.html#nkEnumField	ProtoNodeKind.nkEnumField		7
+nim	nkRpc	nimproto3/ast.html#nkRpc	ProtoNodeKind.nkRpc		7
+nim	nkStream	nimproto3/ast.html#nkStream	ProtoNodeKind.nkStream		7
+nim	nkComment	nimproto3/ast.html#nkComment	ProtoNodeKind.nkComment		7
+nim	nkReserved	nimproto3/ast.html#nkReserved	ProtoNodeKind.nkReserved		7
+nim	nkExtensions	nimproto3/ast.html#nkExtensions	ProtoNodeKind.nkExtensions		7
+nim	nkGroup	nimproto3/ast.html#nkGroup	ProtoNodeKind.nkGroup		7
+nim	nkExtend	nimproto3/ast.html#nkExtend	ProtoNodeKind.nkExtend		7
+nim	ProtoNodeKind	nimproto3/ast.html#ProtoNodeKind	enum ProtoNodeKind		7
+nim	ProtoNode	nimproto3/ast.html#ProtoNode	type ProtoNode		13
+nim	newProtoNode	nimproto3/ast.html#newProtoNode,ProtoNodeKind,string,string,int	proc newProtoNode(kind: ProtoNodeKind; name: string = ""; value: string = "";\n             number: int = 0): ProtoNode		28
+nim	getFullTypeName	nimproto3/ast.html#getFullTypeName,ProtoNode	proc getFullTypeName(node: ProtoNode): string		32
+nim	getRoot	nimproto3/ast.html#getRoot,ProtoNode	proc getRoot(node: ProtoNode): ProtoNode		42
+nim	renameSubmessageTypeNames	nimproto3/ast.html#renameSubmessageTypeNames,ProtoNode	proc renameSubmessageTypeNames(node: ProtoNode)		47
+nim	add	nimproto3/ast.html#add,ProtoNode,ProtoNode	proc add(parent: ProtoNode; child: ProtoNode)		90
+nim	`$`	nimproto3/ast.html#$,ProtoNode	proc `$`(node: ProtoNode): string		93
+nim	printRenamedTypes	nimproto3/ast.html#printRenamedTypes,ProtoNode	proc printRenamedTypes(node: ProtoNode): string		111

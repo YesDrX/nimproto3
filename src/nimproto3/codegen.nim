@@ -414,7 +414,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
     # Handle each oneof field - we need separate case statements for each oneof
     for oneofNode in oneofFields:
       let oneofName = oneofNode.name
-      
+
       # For oneof fields, we generate a case statement
       result &= indentStr & "  case self." & escapeNimKeyword(oneofName &
           "Kind") & "\n"
@@ -448,10 +448,10 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
 
           let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
           let nimType = protoTypeToNim(protoType, false, pkgPrefix)
-          
+
           # FIX: Check both proto type and resolved Nim type to correctly identify enums
           let isEnum = enumNames.contains(protoType) or enumNames.contains(nimType)
-          
+
           let encodeProc = getEncodeProc(protoType)
           let wireType = if isEnum: "wtVarint" else: getWireType(protoType)
 
@@ -532,7 +532,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
 
       let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
       let nimType = protoTypeToNim(protoType, false, pkgPrefix)
-      
+
       # FIX: Robust enum check
       let isEnum = enumNames.contains(protoType) or enumNames.contains(nimType)
 
@@ -695,9 +695,9 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       let decodeProc = getDecodeProc(child.value)
       let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
       let nimType = protoTypeToNim(protoType, false, pkgPrefix)
-      
+
       let isEnum = enumNames.contains(protoType) or enumNames.contains(nimType)
-      
+
       result &= indentStr & "    of " & $fieldNum & ":\n"
 
       if isRepeated:
@@ -838,7 +838,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         let decodeProc = getDecodeProc(oneofField.value)
         let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
         let nimType = protoTypeToNim(protoType, false, pkgPrefix)
-        
+
         let isEnum = enumNames.contains(protoType) or enumNames.contains(nimType)
         let wireType = if isEnum: "wtVarint" else: getWireType(oneofField.value)
 
@@ -927,7 +927,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       let fieldName = child.name
       var protoType = child.value
       let isRepeated = child.attrs.anyIt(it.name == "label" and it.value == "repeated")
-      
+
       var typeWasRenamed = false
       for (origName, qualName) in nestedTypeMap:
         if protoType == origName:
@@ -943,7 +943,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         if root.globalTypeMap.hasKey(protoType):
           protoType = root.globalTypeMap[protoType]
           typeWasRenamed = true
-      
+
       let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
       let nimType = protoTypeToNim(protoType, false, pkgPrefix)
       let isEnum = enumNames.contains(protoType) or enumNames.contains(nimType)
@@ -955,7 +955,8 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
           # Also this avoids needing the enum's specific toJson proc.
           result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
           result &= indentStr & "    result[\"" & fieldName & "\"] = newJArray()\n"
-          result &= indentStr & "    for item in self." & escapeNimKeyword(fieldName) & ":\n"
+          result &= indentStr & "    for item in self." & escapeNimKeyword(
+              fieldName) & ":\n"
           result &= indentStr & "      result[\"" & fieldName & "\"].add(%int(item))\n"
         else:
           result &= indentStr & "  if self." & escapeNimKeyword(fieldName) & ".len > 0:\n"
@@ -979,13 +980,15 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         else:
           if isEnum:
             # ENUM: Inline the conversion to int to avoid dependency on generated proc
-            result &= indentStr & "  if int(self." & escapeNimKeyword(fieldName) & ") != 0:\n"
-            result &= indentStr & "    result[\"" & fieldName & "\"] = %int(self." &
-                escapeNimKeyword(fieldName) & ")\n"
+            result &= indentStr & "  if int(self." & escapeNimKeyword(
+                fieldName) & ") != 0:\n"
+            result &= indentStr & "    result[\"" & fieldName &
+                "\"] = %int(self." & escapeNimKeyword(fieldName) & ")\n"
           else:
             # MESSAGE: Use .toJson() and check content length, avoid binary serialization check
             result &= indentStr & "  block:\n"
-            result &= indentStr & "    let fieldJson = self." & escapeNimKeyword(fieldName) & ".toJson()\n"
+            result &= indentStr & "    let fieldJson = self." &
+                escapeNimKeyword(fieldName) & ".toJson()\n"
             result &= indentStr & "    if fieldJson.len > 0:\n"
             result &= indentStr & "      result[\"" & fieldName & "\"] = fieldJson\n"
 
@@ -1187,7 +1190,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
               typeWasRenamed = true
 
           let pkgPrefix = if typeWasRenamed: "" else: packagePrefix
-          
+
           let condition = "node.hasKey(\"" & fieldName & "\")"
           let keyword = if firstField: "  if " else: "  elif "
           firstField = false
@@ -1362,9 +1365,9 @@ proc collectEnums(node: ProtoNode, prefix: string = "", results: var HashSet[str
   for child in node.children:
     case child.kind
     of nkEnum:
-      let name = if prefix.len > 0: 
-        capitalizeTypeName(prefix & "_" & child.name) 
-      else: 
+      let name = if prefix.len > 0:
+        capitalizeTypeName(prefix & "_" & child.name)
+      else:
         capitalizeTypeName(child.name)
       results.incl(name)
     of nkMessage:
@@ -1630,15 +1633,15 @@ proc generateTypes*(ast: ProtoNode): string =
   ## Generate all type definitions from a Proto AST
   ## Returns Nim code as a string
   ##
-  ast.renameSubmessageTypeNames() 
+  ast.renameSubmessageTypeNames()
 
   result = "import nimproto3\n\n\n# Generated from protobuf\n"
 
   var nestedTypes: seq[string] = @[]
   var mainTypes: seq[string] = @[]
   # FIX: Buffer implementation code to output after types
-  var implCode: seq[string] = @[] 
-  
+  var implCode: seq[string] = @[]
+
   var enumNames = initHashSet[string]()
 
   collectEnums(ast, "", enumNames)
@@ -1748,7 +1751,7 @@ proc generateTypes*(ast: ProtoNode): string =
   for child in ast.children:
     if child.kind == nkMessage:
       result &= generateForwardDeclarations(child, "", "", false)
-  
+
   result &= "\n"
 
   # FIX: Output implementation code (Enums) HERE, after forward declarations
@@ -1812,6 +1815,16 @@ proc generateTypes*(ast: ProtoNode): string =
 proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[],
     extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[
         oldStr: string, newStr: string]] = @[]): string =
+  ## Generate Nim code from a protobuf string.
+  ##
+  ## Arguments:
+  ## - `protoString`: The protobuf code as a string.
+  ## - `searchDirs`: A list of directories to search for imported .proto files.
+  ## - `extraImportPackages`: A list of extra Nim packages to import in the generated code.
+  ## - `replaceCode`: A list of string replacement rules to apply to the generated code.
+  ##
+  ## Returns:
+  ## The generated Nim code as a string.
   let ast = parseProto(protoString, searchDirs,
       extraImportPackages = extraImportPackages)
   result = generateTypes(ast)
@@ -1821,6 +1834,16 @@ proc genCodeFromProtoString*(protoString: string, searchDirs: seq[string] = @[],
 proc genCodeFromProtoFile*(filePath: string, searchDirs: seq[string] = @[],
     extraImportPackages: seq[string] = @[], replaceCode: seq[tuple[
         oldStr: string, newStr: string]] = @[]): string =
+  ## Generate Nim code from a protobuf file.
+  ##
+  ## Arguments:
+  ## - `filePath`: The path to the .proto file.
+  ## - `searchDirs`: A list of directories to search for imported .proto files.
+  ## - `extraImportPackages`: A list of extra Nim packages to import in the generated code.
+  ## - `replaceCode`: A list of string replacement rules to apply to the generated code.
+  ##
+  ## Returns:
+  ## The generated Nim code as a string.
   if not fileExists(filePath):
     raise newException(ValueError, "File does not exist: " & filePath)
 

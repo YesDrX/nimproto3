@@ -1,0 +1,3 @@
+nimTitle	huffman	nimproto3/utils/huffman.html	module src/nimproto3/utils/huffman		0
+nim	hpackHuffmanEncode	nimproto3/utils/huffman.html#hpackHuffmanEncode,string	proc hpackHuffmanEncode(data: string): seq[byte]		343
+nim	hpackHuffmanDecode	nimproto3/utils/huffman.html#hpackHuffmanDecode,seq[byte]	proc hpackHuffmanDecode(data: seq[byte]): string		374

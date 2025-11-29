@@ -1,0 +1,38 @@
+nimTitle	wire_format	nimproto3/wire_format.html	module src/nimproto3/wire_format		0
+nim	wtVarint	nimproto3/wire_format.html#wtVarint	WireType.wtVarint		5
+nim	wt64Bit	nimproto3/wire_format.html#wt64Bit	WireType.wt64Bit		5
+nim	wtLengthDelimited	nimproto3/wire_format.html#wtLengthDelimited	WireType.wtLengthDelimited		5
+nim	wtStartGroup	nimproto3/wire_format.html#wtStartGroup	WireType.wtStartGroup		5
+nim	wtEndGroup	nimproto3/wire_format.html#wtEndGroup	WireType.wtEndGroup		5
+nim	wt32Bit	nimproto3/wire_format.html#wt32Bit	WireType.wt32Bit		5
+nim	WireType	nimproto3/wire_format.html#WireType	enum WireType		5
+nim	encodeVarint	nimproto3/wire_format.html#encodeVarint,uint64	proc encodeVarint(value: uint64): seq[byte]		13
+nim	encodeZigZag	nimproto3/wire_format.html#encodeZigZag,int64	proc encodeZigZag(value: int64): uint64		22
+nim	decodeVarint	nimproto3/wire_format.html#decodeVarint,openArray[byte],int	proc decodeVarint(data: openArray[byte]; pos: var int): uint64		29
+nim	decodeZigZag	nimproto3/wire_format.html#decodeZigZag,uint64	proc decodeZigZag(value: uint64): int64		46
+nim	encodeFieldKey	nimproto3/wire_format.html#encodeFieldKey,int,WireType	proc encodeFieldKey(fieldNumber: int; wireType: WireType): seq[byte]		53
+nim	decodeFieldKey	nimproto3/wire_format.html#decodeFieldKey,openArray[byte],int	proc decodeFieldKey(data: openArray[byte]; pos: var int): tuple[fieldNumber: int,\n    wireType: WireType]		58
+nim	encodeLengthDelimited	nimproto3/wire_format.html#encodeLengthDelimited,openArray[byte]	proc encodeLengthDelimited(data: openArray[byte]): seq[byte]		73
+nim	decodeLengthDelimited	nimproto3/wire_format.html#decodeLengthDelimited,openArray[byte],int	proc decodeLengthDelimited(data: openArray[byte]; pos: var int): seq[byte]		78
+nim	encodeInt32	nimproto3/wire_format.html#encodeInt32,int32	proc encodeInt32(value: int32): seq[byte]		93
+nim	encodeInt64	nimproto3/wire_format.html#encodeInt64,int64	proc encodeInt64(value: int64): seq[byte]		99
+nim	encodeUInt32	nimproto3/wire_format.html#encodeUInt32,uint32	proc encodeUInt32(value: uint32): seq[byte]		102
+nim	encodeUInt64	nimproto3/wire_format.html#encodeUInt64,uint64	proc encodeUInt64(value: uint64): seq[byte]		105
+nim	encodeSInt32	nimproto3/wire_format.html#encodeSInt32,int32	proc encodeSInt32(value: int32): seq[byte]		108
+nim	encodeSInt64	nimproto3/wire_format.html#encodeSInt64,int64	proc encodeSInt64(value: int64): seq[byte]		111
+nim	encodeBool	nimproto3/wire_format.html#encodeBool,bool	proc encodeBool(value: bool): seq[byte]		114
+nim	encodeString	nimproto3/wire_format.html#encodeString,string	proc encodeString(value: string): seq[byte]		117
+nim	encodeString	nimproto3/wire_format.html#encodeString,openArray[byte]	proc encodeString(value: openArray[byte]): seq[byte]		122
+nim	encodeFloat32	nimproto3/wire_format.html#encodeFloat32,float32	proc encodeFloat32(value: float32): seq[byte]		127
+nim	encodeFloat64	nimproto3/wire_format.html#encodeFloat64,float64	proc encodeFloat64(value: float64): seq[byte]		131
+nim	decodeInt32	nimproto3/wire_format.html#decodeInt32,openArray[byte],int	proc decodeInt32(data: openArray[byte]; pos: var int): int32		139
+nim	decodeInt64	nimproto3/wire_format.html#decodeInt64,openArray[byte],int	proc decodeInt64(data: openArray[byte]; pos: var int): int64		144
+nim	decodeUInt32	nimproto3/wire_format.html#decodeUInt32,openArray[byte],int	proc decodeUInt32(data: openArray[byte]; pos: var int): uint32		148
+nim	decodeUInt64	nimproto3/wire_format.html#decodeUInt64,openArray[byte],int	proc decodeUInt64(data: openArray[byte]; pos: var int): uint64		151
+nim	decodeSInt32	nimproto3/wire_format.html#decodeSInt32,openArray[byte],int	proc decodeSInt32(data: openArray[byte]; pos: var int): int32		154
+nim	decodeSInt64	nimproto3/wire_format.html#decodeSInt64,openArray[byte],int	proc decodeSInt64(data: openArray[byte]; pos: var int): int64		157
+nim	decodeBool	nimproto3/wire_format.html#decodeBool,openArray[byte],int	proc decodeBool(data: openArray[byte]; pos: var int): bool		160
+nim	decodeString	nimproto3/wire_format.html#decodeString,openArray[byte],int	proc decodeString(data: openArray[byte]; pos: var int): string		163
+nim	decodeFloat32	nimproto3/wire_format.html#decodeFloat32,openArray[byte],int	proc decodeFloat32(data: openArray[byte]; pos: var int): float32		172
+nim	decodeFloat64	nimproto3/wire_format.html#decodeFloat64,openArray[byte],int	proc decodeFloat64(data: openArray[byte]; pos: var int): float64		178
+nimgrp	encodestring	nimproto3/wire_format.html#encodeString-procs-all	proc		117
