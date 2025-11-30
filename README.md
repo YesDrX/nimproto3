@@ -517,6 +517,7 @@ proc fromBinary*(T: typedesc[MessageType], data: openArray[byte]): MessageType
 
 # JSON serialization
 proc toJson*(self: MessageType): JsonNode
+proc toJson*(T: typedesc[MessageType], data: openArray[byte]): JsonNode # more efficient for sparse data
 proc fromJson*(T: typedesc[MessageType], node: JsonNode): MessageType
 ```
 
