@@ -85,6 +85,7 @@ importProto3 currentSourcePath.parentDir & "/user_service.proto" # full path to 
 #   - proc toBinary*(self: User): seq[byte]
 #   - proc fromBinary*(T: typedesc[User], data: openArray[byte]): User
 #   - proc toJson*(self: User): JsonNode
+#   - proc toJson*(T: typedesc[User], data: openArray[byte]): JsonNode
 #   - proc fromJson*(T: typedesc[User], node: JsonNode): User
 # gRPC client stubs:
 #   - proc getUser*(c: GrpcChannel, req: UserRequest, metadata: seq[HpackHeader] = @[]): Future[User]
