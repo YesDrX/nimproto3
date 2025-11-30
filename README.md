@@ -1,5 +1,5 @@
 # nimproto3
-![Building Status](https://github.com/YesDrX/nimproto3/actions/workflows/mail.yaml/badge.svg)
+![Test](https://github.com/YesDrX/nimproto3/actions/workflows/main.yml/badge.svg)
 
 A Nim implementation of Protocol Buffers 3 (proto3) with support for parsing `.proto` files, generating Nim code, serializing/deserializing data in both binary (protobuf wire format) and JSON formats, and gRPC server/client.
 
