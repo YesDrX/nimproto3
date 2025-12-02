@@ -1,4 +1,4 @@
-{.define: ssl.}
+{.define: grpcTls.}
 import ../../src/nimproto3
 
 importProto3 currentSourcePath.parentDir & "/test_service.proto"

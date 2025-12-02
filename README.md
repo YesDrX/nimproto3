@@ -18,14 +18,14 @@ A Nim implementation of Protocol Buffers 3 (proto3) with support for parsing `.p
     - unary RPCs
     - Identity/Deflate/Gzip/Zlib/Snappy compression (Zstd not supported)
     - Huffman decoding for heaaders
-    - TLS support
+    - TLS support (-d:grpcTls)
   - client
     - streaming RPCs
     - unary RPCs
     - Identity/Deflate/Gzip/Zlib/Snappy compression (Zstd not supported)
     - customized metadata in headers, such as authentication tokens
     - Huffman decoding for heaaders
-    - TLS support
+    - TLS support (-d:grpcTls)
 
 ## Installation
 
@@ -147,7 +147,7 @@ proc handleListUsers(stream: GrpcStream) {.async.} =
 
 when isMainModule:
   # Enable server-side compression preference (e.g., Gzip)
-  let server = newGrpcServer(50051, CompressionGzip) # if -d:ssl, you can specify certFile and keyFile
+  let server = newGrpcServer(50051, CompressionGzip) # if -d:grpcTls, you can specify certFile and keyFile
 
   # Register routes
   server.registerHandler("/UserService/GetUser", handleGetUser) # "/package_name.UserService/GetUser" if package_name is defined in the .proto file
@@ -170,7 +170,7 @@ when isMainModule:
     echo "================================================================================"
 
     # Example 1: Identity + Custom Metadata
-    let client = newGrpcClient("localhost", 50051, CompressionIdentity) #if -d:ssl, you can disable ssl certificate verification by setting sslVerify = false
+    let client = newGrpcClient("localhost", 50051, CompressionIdentity) #if -d:grpcTls, you can disable ssl certificate verification by setting sslVerify = false
     await client.connect()
     await sleepAsync(200) # Wait for settings exchange
 
@@ -196,7 +196,7 @@ when isMainModule:
 nim r -d:showGeneratedProto3Code ./tests/grpc_example/server.nim # -d:showGeneratedProto3Code will show generated code during compile time; # -d:traceGrpc will print out the gRPC network traffic
 nim r -d:showGeneratedProto3Code ./tests/grpc_example/client.nim
 
-# use -d:ssl to enable TLS support on server/client
+# use -d:grpcTls to enable TLS support on server/client
 ```
 - Other examples
   - [server.nim](tests/grpc/server.nim)

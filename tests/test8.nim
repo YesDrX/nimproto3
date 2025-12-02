@@ -1,6 +1,6 @@
-{.define: ssl}
+{.define: grpcTls}
 
-when defined(ssl):
+when defined(grpcTls):
     echo "SSL is enabled"
 
 import nimproto3
@@ -16,7 +16,7 @@ proc runTests() {.async.} =
 
     # Example 1: Identity + Custom Metadata
     # let client = newGrpcClient("grpcb.in", 9000, CompressionIdentity)
-    let client = newGrpcClient("grpcb.in", 9001, CompressionIdentity) # -d:ssl
+    let client = newGrpcClient("grpcb.in", 9001, CompressionIdentity) # -d:grpcTls
 
     await client.connect()
     await sleepAsync(200) # Wait for settings exchange

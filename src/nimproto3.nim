@@ -4,6 +4,6 @@ import nimproto3/[ast, parser, codegen, codegen_macro, wire_format, grpc]
 export ast, parser, codegen, codegen_macro, wire_format, json, tables, grpc,
     options, os, asyncdispatch
 
-when defined(ssl):
+when defined(grpcTls):
     import std/[net, openssl, asyncnet]
     export net, openssl, asyncnet

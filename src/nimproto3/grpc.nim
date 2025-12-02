@@ -6,7 +6,7 @@ import zippy
 import supersnappy 
 
 # Import OpenSSL for ALPN support when SSL is enabled
-when defined(ssl):
+when defined(grpcTls):
   import openssl
 
   # Define ALPN Callback mechanism for Server
@@ -486,7 +486,7 @@ proc readLoop*(conn: Http2Connection) {.async.} =
 
 proc connect*(conn: Http2Connection) {.async.} =
   # Enable SSL for Client if defined
-  when defined(ssl):
+  when defined(grpcTls):
     try:
       # Determine verify mode
       var verifyMode = CVerifyPeer
@@ -704,7 +704,7 @@ proc startRpc*(chan: GrpcChannel, methodPath: string, metadata: seq[
   
   # Determine scheme based on SSL state
   var scheme = "http"
-  when defined(ssl):
+  when defined(grpcTls):
     if chan.conn.socket.isSsl: scheme = "https"
 
   var headers: seq[HpackHeader] = @[
@@ -910,7 +910,7 @@ proc serve*(server: GrpcServer, ip: string = "0.0.0.0") {.async.} =
   echo "[Server] Listening on ", ip, ":", server.port
 
   # Pre-load SSL Context if configured and ssl is defined
-  when defined(ssl):
+  when defined(grpcTls):
     var ctx: SslContext
     let useSsl = server.certFile.len > 0 and server.keyFile.len > 0
     if useSsl:
@@ -933,7 +933,7 @@ proc serve*(server: GrpcServer, ip: string = "0.0.0.0") {.async.} =
   while true:
     let clientSock = await server.socket.accept()
     
-    when defined(ssl):
+    when defined(grpcTls):
       if useSsl:
         try:
           # IMPORTANT: Use handshakeAsServer for incoming connections!
