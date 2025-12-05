@@ -43,8 +43,10 @@ proc handleStreamTest(stream: GrpcStream) {.async.} =
     echo "[Service] Stream item: ", req.message
 
     # Send a reply immediately (Echo)
-    let reply = TestReply(response: "Echo: " & req.message, received: true)
-    await stream.sendMsg(toBinary(reply))
+    let reply1 = TestReply(response: "Echo1: " & req.message, received: true)
+    let reply2 = TestReply(response: "Echo2: " & req.message, received: true)
+    await stream.sendMsg(toBinary(reply1))
+    await stream.sendMsg(toBinary(reply2))
 
 # =============================================================================
 # MAIN SERVER

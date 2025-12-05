@@ -1,6 +1,6 @@
 # grpc.nim
 import std/[asyncdispatch, asyncnet, net, strutils, tables,
-    deques, options, json, sequtils, sugar]
+    deques, options, json, sequtils, sugar, times]
 import ./utils/huffman
 import zippy 
 import supersnappy 
@@ -112,6 +112,9 @@ proc get*[T](q: AsyncQueue[T]): Future[T] =
 when defined(traceGrpc):
   proc toHex(data : seq[byte]): string =
     data.map(it => it.uint8.toHex).join("")
+  
+  proc traceMsg(msg: string) =
+    echo "[gRPC][" & now().format("yyyyMMdd HH:mm:ss.fff") & "] " & msg
 
 # --- Compression Helpers ---
 
@@ -278,9 +281,9 @@ proc decodeHeaders*(ctx: HpackContext, data: seq[byte]): seq[HpackHeader] =
       i += c
       res.add((name, val))
   
-  when defined(traceGrpc):
-    echo "[gRPC] Decoding headers: ", data.toHex
-    echo "[gRPC] Decoded headers: ", res
+  traceMsg("Decoding headers: " & data.toHex)
+  traceMsg("Decoded headers: " & $res)
+
   return res
 
 # =============================================================================
@@ -388,11 +391,9 @@ proc newHttp2Connection*(host: string, port: int,
 proc sendFrame*(conn: Http2Connection, frame: seq[byte]) {.async.} =
   if conn.connected:
     try:
-      when defined(traceGrpc):
-        echo "[gRPC] sending frame: ", frame.toHex
+      traceMsg("Sending frame: " & frame.toHex)
       await conn.socket.send(cast[string](frame))
-      when defined(traceGrpc):
-        echo "[gRPC] frame sent"
+      traceMsg("Frame sent")
     except:
       conn.connected = false
 
@@ -561,8 +562,7 @@ proc sendMsg*(stream: GrpcStream, data: seq[byte]) {.async.} =
   var compFlag: byte = if stream.sendCompression !=
       CompressionIdentity: 1 else: 0
 
-  when defined(traceGrpc):
-    echo "[gRPC] sending data: ", data.toHex
+  traceMsg("Sending data: " & data.toHex)
   
   var frameData = newSeq[byte]()
   frameData.add(compFlag)
@@ -579,6 +579,7 @@ proc sendMsg*(stream: GrpcStream, data: seq[byte]) {.async.} =
 # --- Send Close (Half Close) ---
 proc closeSend*(stream: GrpcStream) {.async.} =
   # Sends an empty DATA frame with END_STREAM set
+  traceMsg("Send empty DATA to note end of stream: END_STREAM")
   await stream.httpStream.connection.sendFrame(packFrame(DATA,
       FrameFlags.ACK_OR_END_STREAM.ord.uint8, stream.httpStream.id, []))
 
@@ -600,12 +601,10 @@ proc recvMsg*(stream: GrpcStream): Future[Option[seq[byte]]] {.async.} =
 
         # Decompress and return
         if isCompressed:
-          when defined(traceGrpc):
-            echo "[gRPC] receiving compressed frame: ", payload.toHex
+          traceMsg("Receiving compressed frame: " & payload.toHex)
           return some(decompressPayload(payload, stream.recvEncoding))
         else:
-          when defined(traceGrpc):
-            echo "[gRPC] receiving uncompressed frame: ", payload.toHex
+          traceMsg("Receiving uncompressed frame: " & payload.toHex)
           return some(payload)
 
     # 2. Check if the stream is truly finished.
@@ -619,8 +618,7 @@ proc recvMsg*(stream: GrpcStream): Future[Option[seq[byte]]] {.async.} =
         if status != 0:
           let msg = stream.httpStream.trailers.getOrDefault("grpc-message", "Unknown error")
           raise newException(GrpcError, "gRPC Error " & $status & ": " & msg)
-      when defined(traceGrpc):
-        echo "[gRPC] returning EOF"
+      traceMsg("Returning EOF")
       return none(seq[byte])
 
     # 3. Read more events
@@ -645,6 +643,7 @@ proc recvMsg*(stream: GrpcStream): Future[Option[seq[byte]]] {.async.} =
 type GrpcChannel* = ref object
   conn*: Http2Connection
   compression*: GrpcCompression
+  activeStreams*: Table[string, GrpcStream]
 
 # Updated Constructors to accept SSL Options
 proc newGrpcChannel*(host: string, port: int,
@@ -656,6 +655,7 @@ proc newGrpcChannel*(host: string, port: int,
   result.conn.sslVerify = sslVerify
   result.conn.sslCaFile = certFile
   result.compression = compression
+  result.activeStreams = initTable[string, GrpcStream]()
 
 proc newGrpcClient*(host: string, port: int,
     compression: GrpcCompression = CompressionIdentity,
@@ -694,6 +694,7 @@ proc close*(chan: GrpcChannel) =
   ## ```nim
   ## client.close()
   ## ```
+  chan.activeStreams.clear()
   chan.conn.connected = false
   chan.conn.socket.close()
 
@@ -732,9 +733,30 @@ proc startRpc*(chan: GrpcChannel, methodPath: string, metadata: seq[
 
 # Helper for Unary calls that wraps startRpc
 proc grpcInvoke*(chan: GrpcChannel, methodPath: string, requests: seq[seq[
-    byte]], metadata: seq[HpackHeader] = @[]): Future[seq[seq[
+    byte]], metadata: seq[HpackHeader] = @[], 
+    requestIsStream: bool = false): Future[seq[seq[
     byte]]] {.async.} =
-  let stream = await chan.startRpc(methodPath, metadata)
+  var stream: GrpcStream
+  
+  traceMsg("grpcInvoke: " & methodPath)
+  
+  if requestIsStream:
+    # Check if stream already exists
+    if chan.activeStreams.hasKey(methodPath):
+      stream = chan.activeStreams[methodPath]
+      # Check if stream is healthy (not closed)
+      if stream.httpStream.closed:
+        # Stream is dead, remove it and create a new one
+        chan.activeStreams.del(methodPath)
+        stream = await chan.startRpc(methodPath, metadata)
+        chan.activeStreams[methodPath] = stream
+    else:
+      # Create new stream and store it
+      stream = await chan.startRpc(methodPath, metadata)
+      chan.activeStreams[methodPath] = stream
+  else:
+    # Unary call - create fresh stream
+    stream = await chan.startRpc(methodPath, metadata)
 
   # Send all requests
   for req in requests:
@@ -749,6 +771,77 @@ proc grpcInvoke*(chan: GrpcChannel, methodPath: string, requests: seq[seq[
     responses.add(msgOpt.get())
 
   return responses
+
+proc sendStreamMsg*(chan: GrpcChannel, methodPath: string, 
+    data: seq[byte]) {.async.} =
+  ## Send a message on an existing streaming request.
+  ##
+  ## Arguments:
+  ## - `chan`: The gRPC channel.
+  ## - `methodPath`: The method path (e.g., "/package.Service/Method").
+  ## - `data`: The message data to send.
+  ##
+  ## Example:
+  ## ```nim
+  ## await chan.sendStreamMsg("/myservice.Greeter/StreamGreet", requestData)
+  ## ```
+  if not chan.activeStreams.hasKey(methodPath):
+    raise newException(GrpcError, "No active stream for " & methodPath)
+  
+  await chan.activeStreams[methodPath].sendMsg(data)
+
+proc closeStreamSend*(chan: GrpcChannel, methodPath: string) {.async.} =
+  ## Close the send side of a streaming request.
+  ##
+  ## Arguments:
+  ## - `chan`: The gRPC channel.
+  ## - `methodPath`: The method path.
+  ##
+  ## Example:
+  ## ```nim
+  ## await chan.closeStreamSend("/myservice.Greeter/StreamGreet")
+  ## ```
+  if not chan.activeStreams.hasKey(methodPath):
+    raise newException(GrpcError, "No active stream for " & methodPath)
+  
+  await chan.activeStreams[methodPath].closeSend()
+
+proc recvStreamMsg*(chan: GrpcChannel, methodPath: string): Future[Option[seq[byte]]] {.async.} =
+  ## Receive a message from an active streaming response.
+  ##
+  ## Arguments:
+  ## - `chan`: The gRPC channel.
+  ## - `methodPath`: The method path.
+  ##
+  ## Returns:
+  ## - `Some(data)` if a message is received.
+  ## - `None` if the stream has ended.
+  ##
+  ## Example:
+  ## ```nim
+  ## while true:
+  ##   let msgOpt = await chan.recvStreamMsg("/myservice.Greeter/StreamGreet")
+  ##   if msgOpt.isNone: break
+  ##   processMessage(msgOpt.get())
+  ## ```
+  if not chan.activeStreams.hasKey(methodPath):
+    raise newException(GrpcError, "No active stream for " & methodPath)
+  
+  return await chan.activeStreams[methodPath].recvMsg()
+
+proc closeStream*(chan: GrpcChannel, methodPath: string) =
+  ## Close and remove a stream from active tracking.
+  ##
+  ## Arguments:
+  ## - `chan`: The gRPC channel.
+  ## - `methodPath`: The method path.
+  ##
+  ## Example:
+  ## ```nim
+  ## chan.closeStream("/myservice.Greeter/StreamGreet")
+  ## ```
+  if chan.activeStreams.hasKey(methodPath):
+    chan.activeStreams.del(methodPath)
 
 # =============================================================================
 # 8. GRPC SERVER
@@ -822,10 +915,9 @@ proc handleServerStream(server: GrpcServer, httpStream: Http2Stream) {.async.} =
   methodPath = httpStream.headers.getOrDefault(":path", "")
   clientEncoding = httpStream.headers.getOrDefault("grpc-encoding", "identity")
 
-  when defined(traceGrpc):
-    echo "[gRPC] Received headers: ", httpStream.headers
-    echo "[gRPC] Client Encoding: ", clientEncoding
-    echo "[gRPC] Method Path: ", methodPath
+  traceMsg("Received headers: " & $httpStream.headers)
+  traceMsg("Client Encoding: " & clientEncoding)
+  traceMsg("Method Path: " & methodPath)
 
   if methodPath == "" or not server.handlers.hasKey(methodPath):
     # Method not found

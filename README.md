@@ -536,6 +536,12 @@ For each service definition, gRPC client stubs are generated:
 proc getUser*(c: GrpcChannel, req: UserRequest, metadata: seq[HpackHeader] = @[]): Future[User]
 proc createUser*(c: GrpcChannel, req: User, metadata: seq[HpackHeader] = @[]): Future[User]
 proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
+
+# When response is stream, we generate two additional functions to consume the stream
+proc getResponseListUsers*(c: GrpcChannel): Future[Option[User]]
+proc getResponseListUsersJson*(c: GrpcChannel): Future[Option[JsonNode]]
+proc getResponsesListUsers*(c: GrpcChannel): Future[seq[User]]
+proc getResponsesListUsersJson*(c: GrpcChannel): Future[seq[JsonNode]]
 ```
 
 **RPC signature mapping:**

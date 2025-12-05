@@ -5,5 +5,7 @@ export ast, parser, codegen, codegen_macro, wire_format, json, tables, grpc,
     options, os, asyncdispatch
 
 when defined(grpcTls):
+    {.hint: "grpcTls is defined, define ssl to enable TLS support".}
+    {.define: ssl.}
     import std/[net, openssl, asyncnet]
     export net, openssl, asyncnet

@@ -33,6 +33,34 @@ when isMainModule:
       echo "Error: ", getCurrentExceptionMsg()
       echo "Stack trace:"
       echo getCurrentException().getStackTrace()
+    
+    echo "\n[Test 2] StreamTest (stream)"
+    try:
+      echo "[Client] Sending StreamTest request..."
+      let responses = await client.streamTest(
+        @[TestRequest(message: "Hello from Nim TLS client!", counter: 37)]
+      )
+      echo "Response: responses='", responses
+      let addition_response = await client.getResponseStreamTest()
+      echo "Response: addition_response='", addition_response
+    except:
+      echo "Error: ", getCurrentExceptionMsg()
+      echo "Stack trace:"
+      echo getCurrentException().getStackTrace()
+
+    echo "\n[Test 3] Second StreamTest (stream)"
+    try:
+      echo "[Client] Sending StreamTest request..."
+      let responses = await client.streamTest(
+        @[TestRequest(message: "Hello from Nim TLS client!", counter: 37)]
+      )
+      echo "Response: responses='", responses
+      let addition_response = await client.getResponseStreamTest()
+      echo "Response: addition_response='", addition_response
+    except:
+      echo "Error: ", getCurrentExceptionMsg()
+      echo "Stack trace:"
+      echo getCurrentException().getStackTrace()
 
     client.close()
     echo "[Client] Connection closed"
