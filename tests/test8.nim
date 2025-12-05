@@ -23,6 +23,8 @@ proc runTests() {.async.} =
     defer: client.close()
     # echo "Response:\n", (await client.index(EmptyMessage())).repr
     # echo "Response:\n", (await client.empty(EmptyMessage())).repr
-    echo "Response:\n", (await client.dummyBidirectionalStreamStream(@[DummyMessage()])).repr
+    await client.dummyBidirectionalStreamStream(@[DummyMessage(f_string  : "Hello from Nim")])
+    echo "Response:\n", (await client.dummyBidirectionalStreamStreamGetResponse())
+
 
 waitFor runTests()

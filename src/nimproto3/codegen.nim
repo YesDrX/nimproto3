@@ -1480,216 +1480,109 @@ proc generateService*(node: ProtoNode, packageName: string = ""): string =
         rpcName[0].toLowerAscii & rpcName[1..^1]
       else:
         rpcName
-
-      # Determine signature based on streaming type
+      
+      let path = if packageName.len > 0: "/" & packageName & "." & node.name & "/" & rpcName
+                   else: "/" & node.name & "/" & rpcName
+      result &= "# Generated gRPC client stub (" & path & "):\n"
+      result &= "#   rpc " & rpcName & "(" & (if clientStreaming: "stream " else: "") & reqNimType & ") -> " & (if serverStreaming: "stream " else: "") & respNimType & "\n"         
+      
+      # Generate procs
       if not clientStreaming and not serverStreaming:
-        # Unary: single request -> single response
-        result &= "proc " & procName & "*(c: GrpcChannel, req: " & reqNimType &
-            ", metadata: seq[HpackHeader] = @[]): Future[" & respNimType & "] {.async.} =\n"
-        result &= "  let binReq = req.toBinary()\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq], metadata)\n"
-        result &= "  if rawResps.len == 0:\n"
-        result &= "    raise newException(ValueError, \"No response received\")\n"
-        result &= "  return " & respNimType & ".fromBinary(rawResps[0])\n\n"
+        # unary call
 
+        # ReqType => RespType
+        result &= "proc " & procName & "*(c: GrpcChannel, req: " & reqNimType & ", metadata: seq[HpackHeader]= @[]): Future[" & respNimType & "] {.async.} =\n"
+        result &= "  let resp = await c.unaryCall(\"" & path & "\", req.toBinary(), metadata)\n"
+        result &= "  return " & respNimType & ".fromBinary(resp)\n\n"
+
+        # ReqType => JsonNode
+        result &= "proc " & procName & "Json*(c: GrpcChannel, req: " & reqNimType & ", metadata: seq[HpackHeader]= @[]): Future[JsonNode] {.async.} =\n"
+        result &= "  let resp = await c.unaryCall(\"" & path & "\", req.toBinary(), metadata)\n"
+        result &= "  return " & respNimType & ".toJson(resp)\n\n"
+      
       elif clientStreaming and not serverStreaming:
-        # Client streaming: seq[request] -> single response
-        result &= "proc " & procName & "*(c: GrpcChannel, reqs: seq[" &
-            reqNimType & "]): Future[" & respNimType & "] {.async.} =\n"
-        result &= "  var binReqs: seq[seq[byte]] = @[]\n"
-        result &= "  for req in reqs:\n"
-        result &= "    binReqs.add(req.toBinary())\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs, requestIsStream=true)\n"
-        result &= "  if rawResps.len == 0:\n"
-        result &= "    raise newException(ValueError, \"No response received\")\n"
-        result &= "  return " & respNimType & ".fromBinary(rawResps[0])\n\n"
+        # client streaming
+        
+        ## send requests
+        result &= "proc " & procName & "*(c: GrpcChannel, reqs: seq[" & reqNimType & "], metadata: seq[HpackHeader]= @[]): Future[void] {.async.} =\n"
+        result &= "  await c.clientStreamingCall(\"" & path & "\", reqs.map(req => req.toBinary()), metadata)\n\n"
+        
+        ## close client stream and get response
+        result &= "proc " & procName & "GetResponse*(c: GrpcChannel): Future[" & respNimType & "] {.async.} =\n"
+        result &= "  await c.sendClientEndStream(\"" & path & "\")\n"
+        result &= "  let resp = await c.recvServerStreamMessage(\"" & path & "\")\n"
+        result &= "  if resp.isNone:\n"
+        result &= "    raise newException(GrpcError, \"No response received for " & path & "\")\n"
+        result &= "  return " & respNimType & ".fromBinary(resp.get())\n\n"
 
+        ## close client stream and get response in json
+        result &= "proc " & procName & "GetResponseJson*(c: GrpcChannel): Future[JsonNode] {.async.} =\n"
+        result &= "  await c.sendClientEndStream(\"" & path & "\")\n"
+        result &= "  let resp = await c.recvServerStreamMessage(\"" & path & "\")\n"
+        result &= "  if resp.isNone:\n"
+        result &= "    raise newException(GrpcError, \"No response received for " & path & "\")\n"
+        result &= "  return " & respNimType & ".toJson(resp.get())\n\n"
+      
       elif not clientStreaming and serverStreaming:
-        # Server streaming: single request -> seq[response]
-        result &= "proc " & procName & "*(c: GrpcChannel, req: " & reqNimType &
-            "): Future[seq[" & respNimType & "]] {.async.} =\n"
-        result &= "  let binReq = req.toBinary()\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq])\n"
-        result &= "  result = @[]\n"
-        result &= "  for r in rawResps:\n"
-        result &= "    result.add(" & respNimType & ".fromBinary(r))\n\n"
+        # server streaming
+        
+        ## send request
+        result &= "proc " & procName & "*(c: GrpcChannel, req: " & reqNimType & ", metadata: seq[HpackHeader]= @[]): Future[void] {.async.} =\n"
+        result &= "  await c.serverStreamingCall(\"" & path & "\", req.toBinary(), metadata)\n\n"
 
-        # Generate getResponse* function for consuming stream messages
-        let getResponseProcName = "getResponse" & capitalizeTypeName(rpcName)
-        result &= "proc " & getResponseProcName & "*(c: GrpcChannel): Future[Option[" & 
-            respNimType & "]] {.async.} =\n"
-        result &= "  ## Receive next message from " & rpcName & " response stream.\n"
-        result &= "  ## Returns Some(response) if available, None if stream ended.\n"
-        result &= "  let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "  if msgOpt.isNone:\n"
-        result &= "    return none(" & respNimType & ")\n"
-        result &= "  return some(" & respNimType & ".fromBinary(msgOpt.get()))\n\n"
+        ## read one response
+        result &= "proc " & procName & "GetResponse*(c: GrpcChannel): Future[" & respNimType & "] {.async.} =\n"
+        result &= "  let resp = await c.recvServerStreamMessage(\"" & path & "\")\n"
+        result &= "  if resp.isNone:\n"
+        result &= "    raise newException(GrpcError, \"No response received for " & path & "\")\n"
+        result &= "  return " & respNimType & ".fromBinary(resp.get)\n\n"
 
-        # Generate getResponses* function for consuming multiple stream messages
-        let getResponsesProcName = "getResponses" & capitalizeTypeName(rpcName)
-        result &= "proc " & getResponsesProcName & "*(c: GrpcChannel): Future[seq[" & 
-            respNimType & "]] {.async.} =\n"
-        result &= "  ## Receive all remaining messages from " & rpcName & " response stream.\n"
-        result &= "  ## Returns sequence of all messages until stream ends.\n"
-        result &= "  result = @[]\n"
-        result &= "  while true:\n"
-        result &= "    let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "    if msgOpt.isNone:\n"
-        result &= "      break\n"
-        result &= "    result.add(" & respNimType & ".fromBinary(msgOpt.get()))\n\n"
+        ## read one response in json
+        result &= "proc " & procName & "GetResponseJson*(c: GrpcChannel): Future[JsonNode] {.async.} =\n"
+        result &= "  let resp = await c.recvServerStreamMessage(\"" & path & "\")\n"
+        result &= "  if resp.isNone:\n"
+        result &= "    raise newException(GrpcError, \"No response received for " & path & "\")\n"
+        result &= "  return " & respNimType & ".toJson(resp.get)\n\n"
 
-      else:
-        # Bidirectional streaming: seq[request] -> seq[response]
-        result &= "proc " & procName & "*(c: GrpcChannel, reqs: seq[" &
-            reqNimType & "]): Future[seq[" & respNimType & "]] {.async.} =\n"
-        result &= "  var binReqs: seq[seq[byte]] = @[]\n"
-        result &= "  for req in reqs:\n"
-        result &= "    binReqs.add(req.toBinary())\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs, requestIsStream=true)\n"
-        result &= "  result = @[]\n"
-        result &= "  for r in rawResps:\n"
-        result &= "    result.add(" & respNimType & ".fromBinary(r))\n\n"
+        ## read all responses
+        result &= "proc " & procName & "GetAllResponses*(c: GrpcChannel): Future[seq[" & respNimType & "]] {.async.} =\n"
+        result &= "  let resp = await c.recvServerStreamAllMessages(\"" & path & "\")\n"
+        result &= "  return resp.map(it => " & respNimType & ".fromBinary(it))\n\n"
 
-        # Generate getResponse* function for consuming stream messages (bidirectional)
-        let getResponseProcName = "getResponse" & capitalizeTypeName(rpcName)
-        result &= "proc " & getResponseProcName & "*(c: GrpcChannel): Future[Option[" & 
-            respNimType & "]] {.async.} =\n"
-        result &= "  ## Receive next message from " & rpcName & " response stream.\n"
-        result &= "  ## Returns Some(response) if available, None if stream ended.\n"
-        result &= "  let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "  if msgOpt.isNone:\n"
-        result &= "    return none(" & respNimType & ")\n"
-        result &= "  return some(" & respNimType & ".fromBinary(msgOpt.get()))\n\n"
+        ## read all responses in json
+        result &= "proc " & procName & "GetAllResponsesJson*(c: GrpcChannel): Future[seq[JsonNode]] {.async.} =\n"
+        result &= "  let resp = await c.recvServerStreamAllMessages(\"" & path & "\")\n"
+        result &= "  return resp.map(it => " & respNimType & ".toJson(it))\n\n"
 
-        # Generate getResponses* function for consuming multiple stream messages (bidirectional)
-        let getResponsesProcName = "getResponses" & capitalizeTypeName(rpcName)
-        result &= "proc " & getResponsesProcName & "*(c: GrpcChannel): Future[seq[" & 
-            respNimType & "]] {.async.} =\n"
-        result &= "  ## Receive all remaining messages from " & rpcName & " response stream.\n"
-        result &= "  ## Returns sequence of all messages until stream ends.\n"
-        result &= "  result = @[]\n"
-        result &= "  while true:\n"
-        result &= "    let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "    if msgOpt.isNone:\n"
-        result &= "      break\n"
-        result &= "    result.add(" & respNimType & ".fromBinary(msgOpt.get()))\n\n"
+        ## close server stream
+        result &= "proc " & procName & "CloseStream*(c: GrpcChannel): Future[void] {.async.} =\n"
+        result &= "  await c.removeActiveStream(\"" & path & "\")\n\n"
+      
+      elif clientStreaming and serverStreaming:
+        # bidirectional streaming
 
-      # Generate JSON returning version of the RPC
-      let jsonProcName = procName & "Json"
+        ## send requests
+        result &= "proc " & procName & "*(c: GrpcChannel, reqs: seq[" & reqNimType & "], metadata: seq[HpackHeader]= @[]): Future[void] {.async.} =\n"
+        result &= "  await c.bidirectionalStreamingCall(\"" & path & "\", reqs.map(req => req.toBinary()), metadata)\n\n"
+        
+        ## read one response
+        result &= "proc " & procName & "GetResponse*(c: GrpcChannel): Future[" & respNimType & "] {.async.} =\n"
+        result &= "  let resp = await c.recvServerStreamMessage(\"" & path & "\")\n"
+        result &= "  if resp.isNone:\n"
+        result &= "    raise newException(GrpcError, \"No response received for " & path & "\")\n"
+        result &= "  return " & respNimType & ".fromBinary(resp.get)\n\n"
 
-      if not clientStreaming and not serverStreaming:
-        # Unary: single request -> single response (JsonNode)
-        result &= "proc " & jsonProcName & "*(c: GrpcChannel, req: " &
-            reqNimType &
-            ", metadata: seq[HpackHeader] = @[]): Future[JsonNode] {.async.} =\n"
-        result &= "  let binReq = req.toBinary()\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq], metadata)\n"
-        result &= "  if rawResps.len == 0:\n"
-        result &= "    raise newException(ValueError, \"No response received\")\n"
-        result &= "  return toJson(" & respNimType & ", rawResps[0])\n\n"
+        ## read one response in json
+        result &= "proc " & procName & "GetResponseJson*(c: GrpcChannel): Future[JsonNode] {.async.} =\n"
+        result &= "  let resp = await c.recvServerStreamMessage(\"" & path & "\")\n"
+        result &= "  if resp.isNone:\n"
+        result &= "    raise newException(GrpcError, \"No response received for " & path & "\")\n"
+        result &= "  return " & respNimType & ".toJson(resp.get)\n\n"
 
-      elif clientStreaming and not serverStreaming:
-        # Client streaming: seq[request] -> single response (JsonNode)
-        result &= "proc " & jsonProcName & "*(c: GrpcChannel, reqs: seq[" &
-            reqNimType & "]): Future[JsonNode] {.async.} =\n"
-        result &= "  var binReqs: seq[seq[byte]] = @[]\n"
-        result &= "  for req in reqs:\n"
-        result &= "    binReqs.add(req.toBinary())\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs, requestIsStream=true)\n"
-        result &= "  if rawResps.len == 0:\n"
-        result &= "    raise newException(ValueError, \"No response received\")\n"
-        result &= "  return toJson(" & respNimType & ", rawResps[0])\n\n"
-
-      elif not clientStreaming and serverStreaming:
-        # Server streaming: single request -> seq[response] (seq[JsonNode])
-        result &= "proc " & jsonProcName & "*(c: GrpcChannel, req: " &
-            reqNimType &
-            "): Future[seq[JsonNode]] {.async.} =\n"
-        result &= "  let binReq = req.toBinary()\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", @[binReq])\n"
-        result &= "  result = @[]\n"
-        result &= "  for r in rawResps:\n"
-        result &= "    result.add(toJson(" & respNimType & ", r))\n\n"
-
-        # Generate getResponseJson* function for consuming stream messages
-        let getResponseJsonProcName = "getResponse" & capitalizeTypeName(rpcName) & "Json"
-        result &= "proc " & getResponseJsonProcName & "*(c: GrpcChannel): Future[Option[JsonNode]] {.async.} =\n"
-        result &= "  ## Receive next message from " & rpcName & " response stream as JSON.\n"
-        result &= "  ## Returns Some(json) if available, None if stream ended.\n"
-        result &= "  let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "  if msgOpt.isNone:\n"
-        result &= "    return none(JsonNode)\n"
-        result &= "  return some(toJson(" & respNimType & ", msgOpt.get()))\n\n"
-
-        # Generate getResponsesJson* function for consuming multiple stream messages
-        let getResponsesJsonProcName = "getResponses" & capitalizeTypeName(rpcName) & "Json"
-        result &= "proc " & getResponsesJsonProcName & "*(c: GrpcChannel): Future[seq[JsonNode]] {.async.} =\n"
-        result &= "  ## Receive all remaining messages from " & rpcName & " response stream as JSON.\n"
-        result &= "  ## Returns sequence of all messages until stream ends.\n"
-        result &= "  result = @[]\n"
-        result &= "  while true:\n"
-        result &= "    let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "    if msgOpt.isNone:\n"
-        result &= "      break\n"
-        result &= "    result.add(toJson(" & respNimType & ", msgOpt.get()))\n\n"
-
-      else:
-        # Bidirectional streaming: seq[request] -> seq[response] (seq[JsonNode])
-        result &= "proc " & jsonProcName & "*(c: GrpcChannel, reqs: seq[" &
-            reqNimType & "]): Future[seq[JsonNode]] {.async.} =\n"
-        result &= "  var binReqs: seq[seq[byte]] = @[]\n"
-        result &= "  for req in reqs:\n"
-        result &= "    binReqs.add(req.toBinary())\n"
-        let path = if packageName.len > 0: "/" & packageName & "." & node.name &
-            "/" & rpcName
-                   else: "/" & node.name & "/" & rpcName
-        result &= "  let rawResps = await c.grpcInvoke(\"" & path & "\", binReqs, requestIsStream=true)\n"
-        result &= "  result = @[]\n"
-        result &= "  for r in rawResps:\n"
-        result &= "    result.add(toJson(" & respNimType & ", r))\n\n"
-
-        # Generate getResponseJson* function for consuming stream messages (bidirectional)
-        let getResponseJsonProcName = "getResponse" & capitalizeTypeName(rpcName) & "Json"
-        result &= "proc " & getResponseJsonProcName & "*(c: GrpcChannel): Future[Option[JsonNode]] {.async.} =\n"
-        result &= "  ## Receive next message from " & rpcName & " response stream as JSON.\n"
-        result &= "  ## Returns Some(json) if available, None if stream ended.\n"
-        result &= "  let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "  if msgOpt.isNone:\n"
-        result &= "    return none(JsonNode)\n"
-        result &= "  return some(toJson(" & respNimType & ", msgOpt.get()))\n\n"
-
-        # Generate getResponsesJson* function for consuming multiple stream messages (bidirectional)
-        let getResponsesJsonProcName = "getResponses" & capitalizeTypeName(rpcName) & "Json"
-        result &= "proc " & getResponsesJsonProcName & "*(c: GrpcChannel): Future[seq[JsonNode]] {.async.} =\n"
-        result &= "  ## Receive all remaining messages from " & rpcName & " response stream as JSON.\n"
-        result &= "  ## Returns sequence of all messages until stream ends.\n"
-        result &= "  result = @[]\n"
-        result &= "  while true:\n"
-        result &= "    let msgOpt = await c.recvStreamMsg(\"" & path & "\")\n"
-        result &= "    if msgOpt.isNone:\n"
-        result &= "      break\n"
-        result &= "    result.add(toJson(" & respNimType & ", msgOpt.get()))\n\n"
+        ## close bidirectional stream
+        result &= "proc " & procName & "CloseStream*(c: GrpcChannel): Future[void] {.async.} =\n"
+        result &= "  await c.sendClientEndStream(\"" & path & "\")\n"
+        result &= "  await c.removeActiveStream(\"" & path & "\")\n\n"
 
 proc generateForwardDeclarations(node: ProtoNode, prefix: string = "",
     packagePrefix: string = "", checkDefined: bool = false): string =

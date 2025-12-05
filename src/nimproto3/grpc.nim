@@ -109,12 +109,15 @@ proc get*[T](q: AsyncQueue[T]): Future[T] =
     q.waiters.addLast(fut)
   return fut
 
-when defined(traceGrpc):
-  proc toHex(data : seq[byte]): string =
-    data.map(it => it.uint8.toHex).join("")
+
+proc toHex(data : seq[byte]): string =
+  data.map(it => it.uint8.toHex).join("")
   
-  proc traceMsg(msg: string) =
-    echo "[gRPC][" & now().format("yyyyMMdd HH:mm:ss.fff") & "] " & msg
+proc traceMsg(msg: string) =
+  when defined(traceGrpc):
+    echo "[gRPC][", now().format("yyyyMMdd HH:mm:ss.fff"), "] ", msg
+  else:
+    discard
 
 # --- Compression Helpers ---
 
@@ -411,6 +414,15 @@ proc createStream*(conn: Http2Connection, id: uint32 = 0): Http2Stream =
   result.connection = conn
   conn.streams[result.id] = result
 
+proc sendWindowUpdate(conn: Http2Connection, streamId: uint32, increment: int) {.async.} =
+  var payload : array[4, byte]
+  let val = increment.uint32
+  payload[0] = ((val shr 24) and 0xFF).byte
+  payload[1] = ((val shr 16) and 0xFF).byte
+  payload[2] = ((val shr 8) and 0xFF).byte
+  payload[3] = (val and 0xFF).byte
+  await conn.sendFrame(packFrame(WINDOW_UPDATE, 0, streamId, payload))
+
 proc processFrame*(conn: Http2Connection, frame: Http2Frame, payload: seq[byte]) =
   let isEndStream = (frame.flags and FrameFlags.ACK_OR_END_STREAM.ord.uint8) != 0
 
@@ -457,6 +469,9 @@ proc processFrame*(conn: Http2Connection, frame: Http2Frame, payload: seq[byte])
       stream.eventQueue.put(StreamEvent(kind: SE_DATA, data: payload,
           endStream: isEndStream))
       if isEndStream: stream.closed = true
+      if payload.len > 0:
+        asyncCheck conn.sendWindowUpdate(0, payload.len)
+        asyncCheck conn.sendWindowUpdate(stream.id, payload.len)
   of RST_STREAM:
     if conn.streams.hasKey(frame.streamId):
       let stream = conn.streams[frame.streamId]
@@ -731,16 +746,15 @@ proc startRpc*(chan: GrpcChannel, methodPath: string, metadata: seq[
 
   return newGrpcStream(stream, false, chan.compression)
 
-# Helper for Unary calls that wraps startRpc
 proc grpcInvoke*(chan: GrpcChannel, methodPath: string, requests: seq[seq[
     byte]], metadata: seq[HpackHeader] = @[], 
-    requestIsStream: bool = false): Future[seq[seq[
-    byte]]] {.async.} =
+    requestIsStream: bool = false, responseIsStream: bool = false): Future[Option[seq[byte]]] {.async.} =
   var stream: GrpcStream
   
   traceMsg("grpcInvoke: " & methodPath)
   
   if requestIsStream:
+    # Case 1: client streaming or bidirectional streaming
     # Check if stream already exists
     if chan.activeStreams.hasKey(methodPath):
       stream = chan.activeStreams[methodPath]
@@ -750,98 +764,84 @@ proc grpcInvoke*(chan: GrpcChannel, methodPath: string, requests: seq[seq[
         chan.activeStreams.del(methodPath)
         stream = await chan.startRpc(methodPath, metadata)
         chan.activeStreams[methodPath] = stream
+      else:
+        if metadata.len > 0:
+          traceMsg("[WARN] grpcInvoke with metadata is not allowed after stream is created: " & methodPath & ". Metadata will be ignored.")
     else:
       # Create new stream and store it
       stream = await chan.startRpc(methodPath, metadata)
       chan.activeStreams[methodPath] = stream
+  elif responseIsStream:
+    # case 2: server streaming 
+    if chan.activeStreams.hasKey(methodPath):
+      chan.activeStreams.del(methodPath) # Remove old stream to start fresh
+    stream = await chan.startRpc(methodPath, metadata)
+    chan.activeStreams[methodPath] = stream
   else:
-    # Unary call - create fresh stream
+    # case 3: unary call
     stream = await chan.startRpc(methodPath, metadata)
 
   # Send all requests
   for req in requests:
     await stream.sendMsg(req)
-
-  await stream.closeSend()
-
-  var responses: seq[seq[byte]] = @[]
-  while true:
+  
+  # consume responses
+  if requestIsStream:
+    # client streaming or bidirectional streaming
+    # user should consume responses later
+    return none(seq[byte])
+  elif responseIsStream:
+    # server streaming
+    await stream.closeSend() # send END_STREAM flag to server to trigger responses; 
+    # user should consume responses later
+    return none(seq[byte])
+  else:
+    # unary call
+    await stream.closeSend() # send END_STREAM flag to server to trigger response
     let msgOpt = await stream.recvMsg()
-    if msgOpt.isNone: break
-    responses.add(msgOpt.get())
+    if msgOpt.isNone:
+      traceMsg("grpcInvoke: " & methodPath & " - No response received")
+    return msgOpt
 
-  return responses
-
-proc sendStreamMsg*(chan: GrpcChannel, methodPath: string, 
-    data: seq[byte]) {.async.} =
-  ## Send a message on an existing streaming request.
-  ##
-  ## Arguments:
-  ## - `chan`: The gRPC channel.
-  ## - `methodPath`: The method path (e.g., "/package.Service/Method").
-  ## - `data`: The message data to send.
-  ##
-  ## Example:
-  ## ```nim
-  ## await chan.sendStreamMsg("/myservice.Greeter/StreamGreet", requestData)
-  ## ```
+proc sendClientEndStream*(chan: GrpcChannel, methodPath: string) {.async.} =
   if not chan.activeStreams.hasKey(methodPath):
     raise newException(GrpcError, "No active stream for " & methodPath)
-  
-  await chan.activeStreams[methodPath].sendMsg(data)
+  chan.activeStreams[methodPath].closeSend()
 
-proc closeStreamSend*(chan: GrpcChannel, methodPath: string) {.async.} =
-  ## Close the send side of a streaming request.
-  ##
-  ## Arguments:
-  ## - `chan`: The gRPC channel.
-  ## - `methodPath`: The method path.
-  ##
-  ## Example:
-  ## ```nim
-  ## await chan.closeStreamSend("/myservice.Greeter/StreamGreet")
-  ## ```
-  if not chan.activeStreams.hasKey(methodPath):
-    raise newException(GrpcError, "No active stream for " & methodPath)
-  
-  await chan.activeStreams[methodPath].closeSend()
-
-proc recvStreamMsg*(chan: GrpcChannel, methodPath: string): Future[Option[seq[byte]]] {.async.} =
-  ## Receive a message from an active streaming response.
-  ##
-  ## Arguments:
-  ## - `chan`: The gRPC channel.
-  ## - `methodPath`: The method path.
-  ##
-  ## Returns:
-  ## - `Some(data)` if a message is received.
-  ## - `None` if the stream has ended.
-  ##
-  ## Example:
-  ## ```nim
-  ## while true:
-  ##   let msgOpt = await chan.recvStreamMsg("/myservice.Greeter/StreamGreet")
-  ##   if msgOpt.isNone: break
-  ##   processMessage(msgOpt.get())
-  ## ```
-  if not chan.activeStreams.hasKey(methodPath):
-    raise newException(GrpcError, "No active stream for " & methodPath)
-  
-  return await chan.activeStreams[methodPath].recvMsg()
-
-proc closeStream*(chan: GrpcChannel, methodPath: string) =
-  ## Close and remove a stream from active tracking.
-  ##
-  ## Arguments:
-  ## - `chan`: The gRPC channel.
-  ## - `methodPath`: The method path.
-  ##
-  ## Example:
-  ## ```nim
-  ## chan.closeStream("/myservice.Greeter/StreamGreet")
-  ## ```
+proc removeActiveStream*(chan: GrpcChannel, methodPath: string) {.async.} =
   if chan.activeStreams.hasKey(methodPath):
     chan.activeStreams.del(methodPath)
+
+proc recvServerStreamMessage*(chan: GrpcChannel, methodPath: string): Future[Option[seq[byte]]] {.async.} =
+  if not chan.activeStreams.hasKey(methodPath):
+    raise newException(GrpcError, "No active stream for " & methodPath)
+  return await chan.activeStreams[methodPath].recvMsg()
+
+proc recvServerStreamAllMessages*(chan: GrpcChannel, methodPath: string): Future[seq[seq[byte]]] {.async.} =
+  if not chan.activeStreams.hasKey(methodPath):
+    raise newException(GrpcError, "No active stream for " & methodPath)
+  while true:
+    let msgOpt = await recvServerStreamMessage(chan, methodPath)
+    if msgOpt.isNone:
+      break
+    result.add(msgOpt.get)
+  await chan.removeActiveStream(methodPath)
+
+proc unaryCall*(chan: GrpcChannel, methodPath: string, request: seq[byte], metadata: seq[HpackHeader] = @[]): Future[seq[byte]] {.async.} =
+  let resp = await chan.grpcInvoke(methodPath, @[request], metadata, false, false)
+  if resp.isNone:
+    traceMsg("grpcInvoke: " & methodPath & " - No response received")
+  else:
+    return resp.get()
+
+proc clientStreamingCall*(chan: GrpcChannel, methodPath: string, requests: seq[seq[byte]], metadata: seq[HpackHeader] = @[]) {.async.} =
+  discard await chan.grpcInvoke(methodPath, requests, metadata, true, false)
+
+proc serverStreamingCall*(chan: GrpcChannel, methodPath: string, request: seq[byte], metadata: seq[HpackHeader] = @[]) {.async.} =
+  discard await chan.grpcInvoke(methodPath, @[request], metadata, false, true)
+
+proc bidirectionalStreamingCall*(chan: GrpcChannel, methodPath: string, requests: seq[seq[byte]], metadata: seq[HpackHeader] = @[]) {.async.} =
+  discard await chan.grpcInvoke(methodPath, requests, metadata, true, true)
 
 # =============================================================================
 # 8. GRPC SERVER

@@ -3,6 +3,8 @@ syntax = "proto3";
 service TestService {
   rpc SimpleTest(TestRequest) returns (TestReply) {};
   rpc StreamTest(stream TestRequest) returns (stream TestReply) {};
+  rpc ClientStreamTest(stream TestRequest) returns (TestReply) {};
+  rpc ServerStreamTest(TestRequest) returns (stream TestReply) {};
 }
 
 message TestRequest {

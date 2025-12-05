@@ -16,8 +16,9 @@ proc runTests() {.async.} =
     await client.connect()
     await sleepAsync(200) # Wait for settings exchange
     defer: client.close()
-    echo "Response:\n", (await client.indexJson(EmptyMessage()))
+    echo "Response:\n", (await client.index(EmptyMessage()))
     echo "Response:\n", (await client.emptyJson(EmptyMessage()))
-    echo "Response:\n", (await client.dummyBidirectionalStreamStreamJson(@[DummyMessage(f_string  : "Hello from Nim")]))
+    await client.dummyBidirectionalStreamStream(@[DummyMessage(f_string  : "Hello from Nim")])
+    echo "Response:\n", (await client.dummyBidirectionalStreamStreamGetResponse())
 
 waitFor runTests()

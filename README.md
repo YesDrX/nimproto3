@@ -87,18 +87,12 @@ importProto3 currentSourcePath.parentDir & "/user_service.proto" # full path to 
 #   - proc toJson*(self: User): JsonNode
 #   - proc toJson*(T: typedesc[User], data: openArray[byte]): JsonNode
 #   - proc fromJson*(T: typedesc[User], node: JsonNode): User
-# gRPC client stubs:
-#   - proc getUser*(c: GrpcChannel, req: UserRequest, metadata: seq[HpackHeader] = @[]): Future[User]
-#   - proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
-#   - proc getUserJson*(c: GrpcChannel, req: UserRequest, metadata: seq[HpackHeader] = @[]): Future[JsonNode] # a memory efficient version of getUser for sparse data
-#   - proc listUsersJson*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[JsonNode]] # a memory efficient version of listUsers for sparse data
+# and gRPC client stubs depending on the service definition types: unary call/client streaming/server streaming/bidirectional streaming
 
 proc handleGetUser(stream: GrpcStream) {.async.} =
-  # 1. Read Request (Unary = Read 1 message)
   let msgOpt = await stream.recvMsg()
 
   if msgOpt.isNone:
-    # Client closed without sending data?
     return
 
   let input = msgOpt.get()
@@ -119,12 +113,8 @@ proc handleGetUser(stream: GrpcStream) {.async.} =
   # 3. Send Response (Unary = Send 1 message)
   await stream.sendMsg(reply.toBinary())
 
-  # When this async proc finishes, the server automatically closes the stream
-  # and sends the Trailing Headers (Status: OK).
-
 # Example of a Server Streaming handler (returning multiple items)
 proc handleListUsers(stream: GrpcStream) {.async.} =
-  # Read incoming requests loop (Bidirectional or Client Stream)
   while true:
     let msgOpt = await stream.recvMsg()
     if msgOpt.isNone: break # End of Stream
@@ -146,14 +136,12 @@ proc handleListUsers(stream: GrpcStream) {.async.} =
 # =============================================================================
 
 when isMainModule:
-  # Enable server-side compression preference (e.g., Gzip)
   let server = newGrpcServer(50051, CompressionGzip) # if -d:grpcTls, you can specify certFile and keyFile
 
   # Register routes
   server.registerHandler("/UserService/GetUser", handleGetUser) # "/package_name.UserService/GetUser" if package_name is defined in the .proto file
   server.registerHandler("/UserService/ListUsers", handleListUsers) # "/package_name.UserService/ListUsers" if package_name is defined in the .proto file
 
-  echo "Starting gRPC Server (Stream Architecture)..."
   waitFor server.serve()
 
 ```
@@ -165,27 +153,18 @@ importProto3 currentSourcePath.parentDir & "/user_service.proto" # full path to 
 
 when isMainModule:
   proc runTests() {.async.} =
-    echo "================================================================================"
-    echo "Nim gRPC Client (Stream Architecture)"
-    echo "================================================================================"
-
     # Example 1: Identity + Custom Metadata
     let client = newGrpcClient("localhost", 50051, CompressionIdentity) #if -d:grpcTls, you can disable ssl certificate verification by setting sslVerify = false
     await client.connect()
     await sleepAsync(200) # Wait for settings exchange
 
     echo "\n[TEST 1] Unary Call with Metadata"
-    try:
-      # Pass custom authorization header
-      let meta = @[("authorization", "Bearer my-secret-token")]
-      let reply = await client.getUser(
-        UserRequest(id: 1),
-        metadata = meta
-      )
-      echo "Reply: ", reply
-    except:
-      echo "Error: ", getCurrentExceptionMsg()
-
+    let meta = @[("authorization", "Bearer my-secret-token")]
+    let reply = await client.getUser(
+      UserRequest(id: 1),
+      metadata = meta
+    )
+    echo "Reply: ", reply
     client.close()
 
   waitFor runTests()
@@ -524,35 +503,43 @@ proc fromJson*(T: typedesc[MessageType], node: JsonNode): MessageType
 
 For each service definition, gRPC client stubs are generated:
 
-```nim
-# Example service:
-# service UserService {
-#   rpc GetUser(UserRequest) returns (User) {};
-#   rpc CreateUser(User) returns (User) {};
-#   rpc ListUsers(stream UserRequest) returns (stream User) {};
-# }
-
-# Generated async stubs:
-proc getUser*(c: GrpcChannel, req: UserRequest, metadata: seq[HpackHeader] = @[]): Future[User]
-proc createUser*(c: GrpcChannel, req: User, metadata: seq[HpackHeader] = @[]): Future[User]
-proc listUsers*(c: GrpcChannel, reqs: seq[UserRequest]): Future[seq[User]]
-
-# When response is stream, we generate two additional functions to consume the stream
-proc getResponseListUsers*(c: GrpcChannel): Future[Option[User]]
-proc getResponseListUsersJson*(c: GrpcChannel): Future[Option[JsonNode]]
-proc getResponsesListUsers*(c: GrpcChannel): Future[seq[User]]
-proc getResponsesListUsersJson*(c: GrpcChannel): Future[seq[JsonNode]]
+```proto
+service TestService {
+  rpc SimpleTest(TestRequest) returns (TestReply) {};
+  rpc StreamTest(stream TestRequest) returns (stream TestReply) {};
+  rpc ClientStreamTest(stream TestRequest) returns (TestReply) {};
+  rpc ServerStreamTest(TestRequest) returns (stream TestReply) {};
+}
 ```
+```nim
+# gRPC client stubs for TestService
+# Generated gRPC client stub (/TestService/SimpleTest):
+#   rpc SimpleTest(TestRequest) -> TestReply
+proc simpleTest*(c: GrpcChannel, req: TestRequest, metadata: seq[HpackHeader]= @[]): Future[TestReply] {.async.} 
+proc simpleTestJson*(c: GrpcChannel, req: TestRequest, metadata: seq[HpackHeader]= @[]): Future[JsonNode] {.async.}
 
-**RPC signature mapping:**
-- Unary: `rpc Method(Req) returns (Resp)` → `proc method(c: GrpcChannel, req: Req, metadata: seq[HpackHeader] = @[]): Future[Resp]`
-  - also `proc methodJson(c: GrpcChannel, req: Req, metadata: seq[HpackHeader] = @[]): Future[JsonNode]`, which is useful when data is sparse as fields with default values are skipped in output json node and we parse bytes deirectly into JsonNode rather than bytes->object->json.
-- Client streaming: `rpc Method(stream Req) returns (Resp)` → `proc method(c: GrpcChannel, reqs: seq[Req]): Future[Resp]`
-  - also `proc methodJson(c: GrpcChannel, reqs: seq[Req]): Future[JsonNode]`
-- Server streaming: `rpc Method(Req) returns (stream Resp)` → `proc method(c: GrpcChannel, req: Req): Future[seq[Resp]]`
-  - also `proc methodJson(c: GrpcChannel, req: Req): Future[seq[JsonNode]]`
-- Bidirectional: `rpc Method(stream Req) returns (stream Resp)` → `proc method(c: GrpcChannel, reqs: seq[Req]): Future[seq[Resp]]`
-  - also `proc methodJson(c: GrpcChannel, reqs: seq[Req]): Future[seq[JsonNode]]`
+# Generated gRPC client stub (/TestService/StreamTest):
+#   rpc StreamTest(stream TestRequest) -> stream TestReply
+proc streamTest*(c: GrpcChannel, reqs: seq[TestRequest], metadata: seq[HpackHeader]= @[]): Future[void] {.async.}
+proc streamTestGetResponse*(c: GrpcChannel): Future[TestReply] {.async.}
+proc streamTestGetResponseJson*(c: GrpcChannel): Future[JsonNode] {.async.}
+proc streamTestCloseStream*(c: GrpcChannel): Future[void] {.async.}
+
+# Generated gRPC client stub (/TestService/ClientStreamTest):
+#   rpc ClientStreamTest(stream TestRequest) -> TestReply
+proc clientStreamTest*(c: GrpcChannel, reqs: seq[TestRequest], metadata: seq[HpackHeader]= @[]): Future[void] {.async.}
+proc clientStreamTestGetResponse*(c: GrpcChannel): Future[TestReply] {.async.}
+proc clientStreamTestGetResponseJson*(c: GrpcChannel): Future[JsonNode] {.async.}
+
+# Generated gRPC client stub (/TestService/ServerStreamTest):
+#   rpc ServerStreamTest(TestRequest) -> stream TestReply
+proc serverStreamTest*(c: GrpcChannel, req: TestRequest, metadata: seq[HpackHeader]= @[]): Future[void] {.async.}
+proc serverStreamTestGetResponse*(c: GrpcChannel): Future[TestReply] {.async.}
+proc serverStreamTestGetResponseJson*(c: GrpcChannel): Future[JsonNode] {.async.}
+proc serverStreamTestGetAllResponses*(c: GrpcChannel): Future[seq[TestReply]] {.async.}
+proc serverStreamTestGetAllResponsesJson*(c: GrpcChannel): Future[seq[JsonNode]] {.async.}
+proc serverStreamTestCloseStream*(c: GrpcChannel): Future[void] {.async.}
+```
 
 **RPC service endpoints:**
 - `test_service.proto:TestService.SimpleTest` → `/TestService/SimpleTest`, or `/package_name.TestService/SimpleTest` if package_name is defined in the .proto file
