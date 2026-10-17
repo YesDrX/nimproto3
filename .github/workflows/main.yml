@@ -14,8 +14,15 @@ jobs:
           - macOS-latest
         nim-version:
           - '2.2.x'
+          - '2.2.12'
+          - '2.2.10'
+          - '2.2.4'
           - stable
           - devel
+        gc:
+          - orc
+          - arc
+          - atomicArc
         exclude:
           # setup-nim-action doesn't support this
           - os: windows-latest
@@ -31,9 +38,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.nimble
-        key: ${{ runner.os }}-nimble-${{ matrix.nim-version}}-${{ hashFiles('yaml.nimble') }}
+        key: ${{ runner.os }}-nimble-${{ matrix.nim-version}}-${{ matrix.gc }}-${{ hashFiles('yaml.nimble') }}
         restore-keys: |
-          ${{ runner.os }}-nimble-${{ matrix.nim-version}}-
+          ${{ runner.os }}-nimble-${{ matrix.nim-version}}-${{ matrix.gc }}-
     - name: Setup nim
       uses: jiro4989/setup-nim-action@v2
       with:
@@ -50,4 +57,4 @@ jobs:
     
     - name: Test
       run: |
-        nimble test
+        nimble test --mm:${{ matrix.gc }}
