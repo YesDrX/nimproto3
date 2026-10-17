@@ -86,6 +86,40 @@ proc decodeLengthDelimited*(data: openArray[byte], pos: var int): seq[byte] =
     copyMem(addr result[0], unsafeAddr data[pos], length)
     pos += length
 
+proc skipField*(data: openArray[byte], pos: var int, wireType: WireType) =
+  ## Skip an unknown field value based on its wire type.
+  ## Required for forward compatibility: newer servers may send fields
+  ## the client's .proto does not know about. Without skipping, the
+  ## value bytes are re-decoded as the next tag, which surfaces as
+  ## "Corrupted protobuf stream: Invalid WireType 6/7" or silent data loss.
+  case wireType
+  of wtVarint:
+    discard decodeVarint(data, pos)
+  of wt64Bit:
+    if pos + 8 > data.len:
+      raise newException(ValueError, "Unexpected end of data skipping 64-bit field")
+    pos += 8
+  of wtLengthDelimited:
+    let length = int(decodeVarint(data, pos))
+    if length < 0 or pos + length > data.len:
+      raise newException(ValueError, "Unexpected end of data skipping length delimited field")
+    pos += length
+  of wtStartGroup:
+    # Groups are deprecated but still legal: skip until matching wtEndGroup.
+    while true:
+      if pos >= data.len:
+        raise newException(ValueError, "Unexpected end of data skipping group")
+      let (_, wt) = decodeFieldKey(data, pos)
+      if wt == wtEndGroup:
+        break
+      skipField(data, pos, wt)
+  of wtEndGroup:
+    discard
+  of wt32Bit:
+    if pos + 4 > data.len:
+      raise newException(ValueError, "Unexpected end of data skipping 32-bit field")
+    pos += 4
+
 # -----------------------------------------------------------------------------
 # ENCODING HELPERS
 # -----------------------------------------------------------------------------

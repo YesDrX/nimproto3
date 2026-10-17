@@ -800,7 +800,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         result &= indentStr & "          let valData = decodeLengthDelimited(entryData, entryPos)\n"
         result &= indentStr & "          val = fromBinary(" & valNimType &
             ", valData)\n"
-      result &= indentStr & "        else: discard\n"
+      result &= indentStr & "        else: skipField(entryData, entryPos, wType)\n"
       result &= indentStr & "      result." & escapeNimKeyword(fieldName) & "[key] = val\n"
 
     of nkOneof:
@@ -885,7 +885,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
                 fieldName) & " = b\n"
 
   result &= indentStr & "    else:\n"
-  result &= indentStr & "      discard\n\n"
+  result &= indentStr & "      skipField(data, pos, wireType)\n\n"
 
   # ==========================================
   # toJson proc
@@ -1148,7 +1148,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
         result &= indentStr & "          let valData = decodeLengthDelimited(entryData, entryPos)\n"
         result &= indentStr & "          valJson = toJson(" & valNimType & ", valData)\n"
 
-      result &= indentStr & "        else: discard\n"
+      result &= indentStr & "        else: skipField(entryData, entryPos, wType)\n"
 
       result &= indentStr & "      result[\"" & fieldName & "\"][key] = valJson\n"
 
@@ -1156,7 +1156,7 @@ proc generateSerializationProcs(node: ProtoNode, typeName: string,
       discard
 
   result &= indentStr & "    else:\n"
-  result &= indentStr & "      discard\n\n"
+  result &= indentStr & "      skipField(data, pos, wireType)\n\n"
 
   # ==========================================
   # fromJson proc
